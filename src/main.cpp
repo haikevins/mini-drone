@@ -67,13 +67,13 @@ static constexpr float g_madgwick_confidence_min = 0.90f;
 
 static float g_madgwick_beta_current = g_madgwick_beta_disarm;
 
-static constexpr uint32_t g_espnow_trans_period_ms = 50u; // 20 Hz
+static constexpr uint32_t g_espnow_trans_period_ms = 100u; // 10 Hz
 static uint32_t g_espnow_trans_last_time = 0u;
 
-static constexpr uint32_t g_espnow_heartbeat_timeout_ms = 600u;
+static constexpr uint32_t g_espnow_heartbeat_timeout_ms = 1000u; // 1000 ms
 
 static constexpr float g_motor_throttle_base_min = 1000.0f;   // motor stop / disarmed
-static constexpr float g_motor_throttle_base_max = 1600.0f;
+static constexpr float g_motor_throttle_base_max = 1400.0f;
 
 static constexpr float g_motor_throttle_idle = 1100.0f;  // armed idle
 static constexpr float g_motor_throttle_min = 1000.0f;  // min throttle
