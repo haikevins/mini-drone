@@ -94,10 +94,10 @@ static constexpr uint8_t drone_address[] = {0xEC, 0xDA, 0x3B, 0xBF, 0x7B, 0xC4};
 
 Adafruit_SSD1306 display(OLED_SCREEN_WIDTH, OLED_SCREEN_HEIGHT, &Wire, OLED_RESET_PIN);
 
-static constexpr uint32_t display_update_interval = 50u;
+static constexpr uint32_t display_update_interval = 100u;
 static uint32_t last_display_update_time = 0u;
 
-static constexpr uint32_t heartbeat_update_interval = 50u;
+static constexpr uint32_t heartbeat_update_interval = 100u;
 static uint32_t last_heartbeat_data_send_time = 0u;
 
 void send_command()
