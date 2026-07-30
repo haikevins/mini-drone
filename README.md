@@ -22,7 +22,7 @@
   <img
     src="docs/images/drone-bottom.png"
     alt="Mini drone bottom view"
-    width="47%"
+    width="48%"
   >
 </p>
 
