@@ -4,7 +4,7 @@ A compact ESP32-C3 flight-control firmware for a four-motor mini drone.
 
 <p align="center">
   <img src="docs/images/drone-top.png" alt="Mini drone top view" width="31%">
-  <img src="docs/images/drone-bottom.png" alt="Mini drone bottom view" width="31%">
+  <img src="docs/images/drone-bottom.png" alt="Mini drone bottom view" width="36%">
   <img src="docs/images/drone-front.png" alt="Mini drone front view" width="31%">
 </p>
 
@@ -154,20 +154,6 @@ loop()
   └── Write motor commands
 ```
 
-## Safety
-
-> Remove all propellers before uploading firmware, calibrating sensors, debugging motor output, or testing the arm/disarm logic.
-
-- Secure the drone before motor tests.
-- Start with a current-limited power supply when possible.
-- Verify motor order and propeller direction before flight.
-- Test the failsafe behavior before performing a free-flight test.
-- Do not arm the system near people, animals, or loose objects.
-
 ## Status
 
 This project is under active development and should be treated as experimental flight-control firmware.
-
-## License
-
-Add the project license before redistributing or reusing the source code.
