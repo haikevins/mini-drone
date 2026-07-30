@@ -1,7 +1,5 @@
 # Mini Drone — Drone Flight
 
-## Images
-
 <p align="center">
   <img
     src="docs/images/drone-front.png"
