@@ -1,8 +1,6 @@
 # Mini Drone — Drone Flight
 
-<p align="center">
-  <strong>A compact ESP32-C3 flight-control firmware for a four-motor mini drone.</strong>
-</p>
+## Images
 
 <p align="center">
   <img
