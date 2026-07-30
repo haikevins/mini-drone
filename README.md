@@ -1,11 +1,33 @@
 # Mini Drone — Drone Flight
 
-A compact ESP32-C3 flight-control firmware for a four-motor mini drone.
+<p align="center">
+  <strong>A compact ESP32-C3 flight-control firmware for a four-motor mini drone.</strong>
+</p>
 
 <p align="center">
-  <img src="docs/images/drone-top.png" alt="Mini drone top view" width="30%">
-  <img src="docs/images/drone-bottom.png" alt="Mini drone bottom view" width="32%">
-  <img src="docs/images/drone-front.png" alt="Mini drone front view" width="31%">
+  <img
+    src="docs/images/drone-front.png"
+    alt="Mini drone front view"
+    width="72%"
+  >
+</p>
+
+<p align="center">
+  <img
+    src="docs/images/drone-top.png"
+    alt="Mini drone top view"
+    width="45%"
+  >
+  &nbsp;
+  <img
+    src="docs/images/drone-bottom.png"
+    alt="Mini drone bottom view"
+    width="45%"
+  >
+</p>
+
+<p align="center">
+  <sub>Front view, top view, and bottom view of the mini-drone hardware.</sub>
 </p>
 
 ## Overview
