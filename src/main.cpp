@@ -112,6 +112,8 @@ void setup()
 
 void loop()
 {
+    g_motors.write_all_motors(1100.0f);
+    /*
     const uint32_t now = millis();
 
     if (g_imu.update() == false)
@@ -328,7 +330,8 @@ void loop()
     {
         g_espnow_trans_last_time = now;
         g_espnow.send_attitude(g_attitude_data);
-    }    
+    }
+    */    
 }
 
 static void reset_attitude_target()
