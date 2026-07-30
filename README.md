@@ -4,7 +4,7 @@ A compact ESP32-C3 flight-control firmware for a four-motor mini drone.
 
 <p align="center">
   <img src="docs/images/drone-top.png" alt="Mini drone top view" width="31%">
-  <img src="docs/images/drone-bottom.png" alt="Mini drone bottom view" width="36%">
+  <img src="docs/images/drone-bottom.png" alt="Mini drone bottom view" width="33%">
   <img src="docs/images/drone-front.png" alt="Mini drone front view" width="31%">
 </p>
 
