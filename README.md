@@ -8,7 +8,7 @@
   <img
     src="docs/images/drone-front.png"
     alt="Mini drone front view"
-    width="72%"
+    width="70%"
   >
 </p>
 
@@ -22,7 +22,7 @@
   <img
     src="docs/images/drone-bottom.png"
     alt="Mini drone bottom view"
-    width="45%"
+    width="47%"
   >
 </p>
 
