@@ -26,10 +26,6 @@
   >
 </p>
 
-<p align="center">
-  <sub>Front view, top view, and bottom view of the mini-drone hardware.</sub>
-</p>
-
 ## Overview
 
 This branch contains the onboard firmware responsible for reading the IMU, estimating the drone attitude, receiving remote-control commands, running the stabilization controllers, and driving four motors.
