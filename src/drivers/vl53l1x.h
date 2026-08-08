@@ -1,7 +1,6 @@
 /*
  * vl53l1x.h
  * Minimal register-level VL53L1X driver for this flight controller.
- * No third-party VL53L1X library is required.
  */
 
 #ifndef VL53L1X_DRIVER_H

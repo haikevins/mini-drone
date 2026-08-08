@@ -8,6 +8,7 @@
 #include "drivers/mpu6500.h"
 #include "drivers/adns_3080.h"
 #include "drivers/vl53l1x.h"
+
 #include "estimator/madgwick.h"
 
 #include "control/pid_controller.h"
@@ -17,6 +18,7 @@
 
 #include "hal/motors.h"
 #include "hal/i2c_bus.h"
+#include "hal/spi_bus.h"
 
 static SPIBus g_spi_bus;
 static I2CBus g_i2c_bus;

@@ -1,10 +1,6 @@
 /*
  * adns_3080.h
  * ADNS-3080 optical-flow sensor driver.
- *
- * The driver owns only ADNS-3080 hardware access and the latest sensor data.
- * Scheduling and flight-level processing are intentionally kept in main.cpp,
- * matching the way MPU6500 data is consumed by the application.
  */
 
 #ifndef ADNS_3080_H

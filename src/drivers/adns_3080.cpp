@@ -1,11 +1,6 @@
 /*
  * adns_3080.cpp
  * ADNS-3080 optical-flow sensor driver.
- *
- * Logic is intentionally kept equivalent to the original standalone source.
- * Direct calls to SPI are replaced by shared SPIBus transactions so MPU6500
- * and ADNS-3080 can safely use the same SCK/MISO/MOSI pins with independent
- * chip-select pins and independent SPI clock settings.
  */
 
 #include "drivers/adns_3080.h"
