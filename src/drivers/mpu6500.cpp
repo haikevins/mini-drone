@@ -115,7 +115,7 @@ bool MPU6500::read_accel_average_g(uint16_t samples, float & avg_x, float & avg_
     return true;
 }
 
-bool MPU6500::begin(SPIBus * p_spi_bus_ref, uint8_t chip_select_pin_ref, int sck_pin, int miso_pin, int mosi_pin)
+bool MPU6500::begin(SPIBus * p_spi_bus_ref, uint8_t chip_select_pin_ref)
 {
     if (p_spi_bus_ref == nullptr)
     {
@@ -128,7 +128,10 @@ bool MPU6500::begin(SPIBus * p_spi_bus_ref, uint8_t chip_select_pin_ref, int sck
     pinMode(chip_select_pin, OUTPUT);
     digitalWrite(chip_select_pin, HIGH);
 
-    p_spi_bus->begin(sck_pin, miso_pin, mosi_pin);
+    if (p_spi_bus->is_initialized() == false)
+    {
+        return false;
+    }
 
     delay(100);
 
@@ -140,7 +143,7 @@ bool MPU6500::begin(SPIBus * p_spi_bus_ref, uint8_t chip_select_pin_ref, int sck
     /*
      * Wake up MPU6500.
      */
-    p_spi_bus->write_register(chip_select_pin, pwr_mgmt_1_reg, 0x00u);
+    p_spi_bus->write_register(chip_select_pin, pwr_mgmt_1_reg, 0x00u, spi_settings);
     delay(100);
 
     /*
@@ -150,22 +153,22 @@ bool MPU6500::begin(SPIBus * p_spi_bus_ref, uint8_t chip_select_pin_ref, int sck
      * GYRO_CONFIG = 0x18: ±2000 dps
      * ACCEL_CONFIG= 0x08: ±4g
      */
-    p_spi_bus->write_register(chip_select_pin, config_reg, 0x01u);
-    p_spi_bus->write_register(chip_select_pin, accel_config_2_reg, 0x01u);
-    p_spi_bus->write_register(chip_select_pin, smplrt_div_reg, 0x00u);
+    p_spi_bus->write_register(chip_select_pin, config_reg, 0x01u, spi_settings);
+    p_spi_bus->write_register(chip_select_pin, accel_config_2_reg, 0x01u, spi_settings);
+    p_spi_bus->write_register(chip_select_pin, smplrt_div_reg, 0x00u, spi_settings);
 
-    p_spi_bus->write_register(chip_select_pin, gyro_config_reg, 0x18u);
-    p_spi_bus->write_register(chip_select_pin, accel_config_reg, 0x08u);
+    p_spi_bus->write_register(chip_select_pin, gyro_config_reg, 0x18u, spi_settings);
+    p_spi_bus->write_register(chip_select_pin, accel_config_reg, 0x08u, spi_settings);
 
     /*
      * Enable data-ready status bit.
      */
-    p_spi_bus->write_register(chip_select_pin, int_enable_reg, 0x01u);
+    p_spi_bus->write_register(chip_select_pin, int_enable_reg, 0x01u, spi_settings);
 
     /*
      * Clear any stale interrupt status.
      */
-    p_spi_bus->read_register(chip_select_pin, int_status_reg);
+    p_spi_bus->read_register(chip_select_pin, int_status_reg, spi_settings);
 
     timing.last_us = micros();
     timing.now_us = timing.last_us;
@@ -184,7 +187,7 @@ bool MPU6500::validate_whoami()
         return false;
     }
 
-    const uint8_t whoami = p_spi_bus->read_register(chip_select_pin, who_am_i_reg);
+    const uint8_t whoami = p_spi_bus->read_register(chip_select_pin, who_am_i_reg, spi_settings);
 
     return ((whoami == 0x70u) || (whoami == 0x71u));
 }
@@ -196,7 +199,7 @@ bool MPU6500::data_ready()
         return false;
     }
 
-    const uint8_t status = p_spi_bus->read_register(chip_select_pin, int_status_reg);
+    const uint8_t status = p_spi_bus->read_register(chip_select_pin, int_status_reg, spi_settings);
     return ((status & data_ready_mask) != 0u);
 }
 
@@ -249,7 +252,10 @@ bool MPU6500::read_sensor()
 
     uint8_t buffer[14];
 
-    p_spi_bus->read_registers(chip_select_pin, accel_xout_h_reg, buffer, 14);
+    if (p_spi_bus->read_registers(chip_select_pin, accel_xout_h_reg, buffer, 14, spi_settings) == false)
+    {
+        return false;
+    }
 
     raw.ax = static_cast<int16_t>((static_cast<uint16_t>(buffer[0]) << 8) | buffer[1]);
     raw.ay = static_cast<int16_t>((static_cast<uint16_t>(buffer[2]) << 8) | buffer[3]);
@@ -659,6 +665,11 @@ const MPU6500::scaled_data_t & MPU6500::get_scaled() const
 }
 
 const MPU6500::scaled_data_t & MPU6500::get_filtered() const
+{
+    return filtered;
+}
+
+const MPU6500::scaled_data_t & MPU6500::get_data() const
 {
     return filtered;
 }

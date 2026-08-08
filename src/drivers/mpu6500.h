@@ -53,7 +53,7 @@ class MPU6500
             float scale_z = 1.0f;
         };
 
-        bool begin(SPIBus * p_spi_bus, uint8_t chip_select_pin, int sck_pin, int miso_pin, int mosi_pin);
+        bool begin(SPIBus * p_spi_bus, uint8_t chip_select_pin);
 
         /*
          * Main IMU pipeline:
@@ -119,11 +119,13 @@ class MPU6500
         const raw_data_t & get_raw() const;
         const scaled_data_t & get_scaled() const;
         const scaled_data_t & get_filtered() const;
+        const scaled_data_t & get_data() const;
         const timing_t & get_timing() const;
 
     private:
         SPIBus * p_spi_bus = nullptr;
         uint8_t chip_select_pin = 0u;
+        SPISettings spi_settings = SPISettings(8000000u, MSBFIRST, SPI_MODE3);
 
         raw_data_t raw;
         scaled_data_t scaled;
