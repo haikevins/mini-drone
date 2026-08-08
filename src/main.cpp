@@ -93,8 +93,7 @@ static constexpr uint32_t g_i2c_frequency_hz = 400000u;
  * Raw optical-flow sensor data is sampled at 200 Hz.
  */
 static constexpr uint32_t g_adns_read_hz = 200u;
-static constexpr uint32_t g_adns_read_period_us =
-    1000000UL / g_adns_read_hz;
+static constexpr uint32_t g_adns_read_period_us = 1000000ul / g_adns_read_hz;
 
 static uint32_t g_adns_last_read_time_us = 0u;
 
@@ -107,8 +106,7 @@ static uint32_t g_adns_last_read_time_us = 0u;
  */
 static constexpr uint32_t g_vl53l1x_read_hz = 20u;
 
-static constexpr uint32_t g_vl53l1x_read_period_us =
-    1000000UL / g_vl53l1x_read_hz;
+static constexpr uint32_t g_vl53l1x_read_period_us = 1000000ul / g_vl53l1x_read_hz;
 
 static constexpr uint32_t g_vl53l1x_poll_period_us = 1000u;
 
@@ -158,8 +156,7 @@ static constexpr float g_madgwick_acc_error_bad = 0.25f;
 static constexpr float g_madgwick_beta_alpha = 0.02f;
 static constexpr float g_madgwick_confidence_min = 0.90f;
 
-static float g_madgwick_beta_current =
-    g_madgwick_beta_disarm;
+static float g_madgwick_beta_current = g_madgwick_beta_disarm;
 
 
 /**
@@ -175,8 +172,7 @@ static uint32_t g_espnow_trans_last_time = 0u;
 /**
  * @brief ESP-NOW heartbeat and communication failsafe configuration.
  */
-static constexpr uint32_t g_espnow_heartbeat_timeout_us =
-    1000000u;
+static constexpr uint32_t g_espnow_heartbeat_timeout_us = 1000000u;
 
 
 /**
@@ -217,8 +213,7 @@ static bool g_failsafe_active = false;
 /**
  * @brief Current motor throttle state.
  */
-static float g_motor_throttle_base =
-    g_motor_throttle_idle;
+static float g_motor_throttle_base = g_motor_throttle_idle;
 
 static bool g_was_armed = false;
 
