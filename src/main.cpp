@@ -6,6 +6,8 @@
 #include <math.h>
 
 #include "drivers/mpu6500.h"
+#include "drivers/adns_3080.h"
+#include "drivers/vl53l1x.h"
 #include "estimator/madgwick.h"
 
 #include "control/pid_controller.h"
@@ -14,9 +16,14 @@
 #include "communication/espnow_protocol.h"
 
 #include "hal/motors.h"
+#include "hal/i2c_bus.h"
 
 static SPIBus g_spi_bus;
+static I2CBus g_i2c_bus;
+
 static MPU6500 g_imu;
+static ADNS3080 g_adns;
+static VL53L1X g_vl53l1x;
 static Madgwick g_madgwick;
 
 static Motors g_motors;
@@ -44,10 +51,32 @@ static float g_target_pitch_angle = 0.0f;
 
 static constexpr float g_direction_deg = 10.0f;
 
-static constexpr uint8_t g_imu_pin_sck = 4u;
-static constexpr uint8_t g_imu_pin_miso = 5u;
-static constexpr uint8_t g_imu_pin_mosi = 6u;
+static constexpr uint8_t g_spi_pin_sck = 4u;
+static constexpr uint8_t g_spi_pin_miso = 5u;
+static constexpr uint8_t g_spi_pin_mosi = 6u;
+
 static constexpr uint8_t g_imu_pin_ncs = 7u;
+
+static constexpr uint8_t g_adns_pin_ncs = 21u;
+static constexpr uint8_t g_adns_pin_rst = 20u;
+static constexpr int8_t g_adns_pin_npd = -1;
+
+static constexpr uint8_t g_i2c_pin_sda = 8u;
+static constexpr uint8_t g_i2c_pin_scl = 9u;
+static constexpr uint32_t g_i2c_frequency_hz = 400000u;
+
+static constexpr uint32_t g_adns_read_hz = 200u;
+static constexpr uint32_t g_adns_read_period_us = 1000000UL / g_adns_read_hz;
+static uint32_t g_adns_last_read_time_us = 0u;
+
+static constexpr uint32_t g_vl53l1x_read_hz = 20u;
+static constexpr uint32_t g_vl53l1x_read_period_us = 1000000UL / g_vl53l1x_read_hz;
+static constexpr uint32_t g_vl53l1x_poll_period_us = 1000u;
+static uint32_t g_vl53l1x_last_read_time_us = 0u;
+static uint32_t g_vl53l1x_last_poll_time_us = 0u;
+
+static constexpr uint32_t g_vl53l1x_timeout_ms = 500u;
+static constexpr int16_t g_vl53l1x_offset_mm = 0;
 
 static constexpr float g_imu_read_default_hz = 1000.0f;
 
@@ -67,10 +96,10 @@ static constexpr float g_madgwick_confidence_min = 0.90f;
 
 static float g_madgwick_beta_current = g_madgwick_beta_disarm;
 
-static constexpr uint32_t g_espnow_trans_period_ms = 100u; // 10 Hz
+static constexpr uint32_t g_espnow_trans_period_us = 50000u; // 20 Hz
 static uint32_t g_espnow_trans_last_time = 0u;
 
-static constexpr uint32_t g_espnow_heartbeat_timeout_ms = 1000u; // 1000 ms
+static constexpr uint32_t g_espnow_heartbeat_timeout_us = 1000000u; // 1000 ms
 
 static constexpr float g_motor_throttle_base_min = 1000.0f;   // motor stop / disarmed
 static constexpr float g_motor_throttle_base_max = 1400.0f;
@@ -88,7 +117,11 @@ static bool g_failsafe_active = false;
 static float g_motor_throttle_base = g_motor_throttle_idle;
 static bool g_was_armed = false;
 
+static void setup_spi_bus();
+static void setup_i2c_bus();
 static void setup_imu();
+static void setup_adns();
+static void setup_vl53l1x();
 static void setup_pid();
 static void setup_espnow();
 
@@ -100,10 +133,14 @@ static void reset_attitude_target();
 
 void setup()
 {
-    // Serial.begin(115200);
-    // delay(2000);
+    Serial.begin(115200);
+    delay(2000);
 
+    setup_spi_bus();
+    setup_i2c_bus();
     setup_imu();
+    setup_adns();
+    setup_vl53l1x();
     setup_pid();
     setup_espnow();
 
@@ -112,10 +149,11 @@ void setup()
 
 void loop()
 {
-    g_motors.write_all_motors(1100.0f);
-    /*
-    const uint32_t now = millis();
+    const uint32_t now = micros();
 
+    /*
+     * 1000 Hz flight control.
+     */
     if (g_imu.update() == false)
     {
         return;
@@ -158,7 +196,7 @@ void loop()
         return; 
     }
 
-    const bool is_heartbeat_recent = g_espnow.is_heartbeat_recent(g_espnow_heartbeat_timeout_ms);
+    const bool is_heartbeat_recent = g_espnow.is_heartbeat_recent(g_espnow_heartbeat_timeout_us);
     if ((g_espnow.is_armed() == true) && (is_heartbeat_recent == false))
     {
         g_failsafe_active = true;
@@ -326,12 +364,11 @@ void loop()
         g_failsafe_active = false;
     }
 
-    if (now - g_espnow_trans_last_time >= g_espnow_trans_period_ms)
+    if (now - g_espnow_trans_last_time >= g_espnow_trans_period_us)
     {
         g_espnow_trans_last_time = now;
         g_espnow.send_attitude(g_attitude_data);
     }
-    */    
 }
 
 static void reset_attitude_target()
@@ -415,14 +452,50 @@ static float update_madgwick_beta(float ax, float ay, float az)
     return g_madgwick_beta_current;
 }
 
+void setup_spi_bus()
+{
+    /*
+     * Deselect every device sharing the physical SPI bus before SPI starts.
+     */
+    pinMode(g_imu_pin_ncs, OUTPUT);
+    digitalWrite(g_imu_pin_ncs, HIGH);
+
+    pinMode(g_adns_pin_ncs, OUTPUT);
+    digitalWrite(g_adns_pin_ncs, HIGH);
+
+    const bool b_spi_ready = g_spi_bus.begin(
+        g_spi_pin_sck,
+        g_spi_pin_miso,
+        g_spi_pin_mosi
+    );
+
+    if (b_spi_ready == false)
+    {
+        Serial.println("SPI BUS INIT FAILED");
+        for (;;) {}
+    }
+}
+
+void setup_i2c_bus()
+{
+    const bool b_i2c_ready = g_i2c_bus.begin(
+        g_i2c_pin_sda,
+        g_i2c_pin_scl,
+        g_i2c_frequency_hz
+    );
+
+    if (b_i2c_ready == false)
+    {
+        Serial.println("I2C BUS INIT FAILED");
+        for (;;) {}
+    }
+}
+
 void setup_imu()
 {
     const bool b_imu_ready = g_imu.begin(
         &g_spi_bus,
-        g_imu_pin_ncs,
-        g_imu_pin_sck,
-        g_imu_pin_miso,
-        g_imu_pin_mosi
+        g_imu_pin_ncs
     );
     if (b_imu_ready == false)
     {
@@ -464,6 +537,47 @@ void setup_imu()
 
     g_madgwick.begin(g_imu_read_default_hz);
     g_madgwick.setBeta(g_madgwick_beta_current);
+}
+
+void setup_adns()
+{
+    const bool b_adns_ready = g_adns.begin(
+        &g_spi_bus,
+        g_adns_pin_ncs,
+        g_adns_pin_rst,
+        g_adns_pin_npd
+    );
+
+    if (b_adns_ready == false)
+    {
+        Serial.println("ADNS3080 NOT DETECTED");
+        for (;;) {}
+    }
+    else
+    {
+        Serial.println("ADNS3080 DETECTED");
+    }
+}
+
+void setup_vl53l1x()
+{
+    const bool b_vl53l1x_ready = g_vl53l1x.begin(
+        &g_i2c_bus,
+        VL53L1X::default_i2c_address,
+        g_vl53l1x_timeout_ms,
+        g_vl53l1x_offset_mm
+    );
+
+    if (b_vl53l1x_ready == false)
+    {
+        Serial.print("VL53L1X INIT FAILED: ");
+        Serial.println(g_vl53l1x.get_init_error_string());
+        for (;;) {}
+    }
+    else
+    {
+        Serial.println("VL53L1X DETECTED");
+    }
 }
 
 void setup_pid()
