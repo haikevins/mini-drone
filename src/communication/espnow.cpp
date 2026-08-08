@@ -6,7 +6,7 @@ ESPNow::ESPNow() :
     command_data{false, false, false, false, false, false, false, false},
     heartbeat_data{0u},
 
-    last_heartbeat_receive_time_ms(0u)
+    last_heartbeat_receive_time_us(0u)
 {}
 
 bool ESPNow::begin()
@@ -100,9 +100,9 @@ const command_data_packet_t & ESPNow::get_command_data() const
     return command_data;
 }
 
-bool ESPNow::is_heartbeat_recent(uint32_t timeout_ms) const
+bool ESPNow::is_heartbeat_recent(uint32_t timeout_us) const
 {
-    return (millis() - last_heartbeat_receive_time_ms) <= timeout_ms;
+    return (micros() - last_heartbeat_receive_time_us) <= timeout_us;
 }
 
 void ESPNow::register_recv_callback(esp_now_recv_cb_t callback)
@@ -131,7 +131,7 @@ void ESPNow::on_data_recv(const esp_now_recv_info_t *info, const uint8_t *data, 
     }
 
     ESPNow * self = active_instance;
-    const uint32_t now = millis();
+    const uint32_t now = micros();
 
     if (data_len == static_cast<int>(sizeof(self->command_data)))
     {
@@ -142,7 +142,7 @@ void ESPNow::on_data_recv(const esp_now_recv_info_t *info, const uint8_t *data, 
     if (data_len == static_cast<int>(sizeof(heartbeat_data_packet_t)))
     {
         memcpy(&self->heartbeat_data, data, sizeof(self->heartbeat_data));
-        self->last_heartbeat_receive_time_ms = now;
+        self->last_heartbeat_receive_time_us = now;
         return;
     }
 }

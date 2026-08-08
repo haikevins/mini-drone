@@ -45,7 +45,7 @@ class ESPNow
         command_data_packet_t command_data;
         heartbeat_data_packet_t heartbeat_data;
 
-        uint32_t last_heartbeat_receive_time_ms;
+        uint32_t last_heartbeat_receive_time_us;
 
         static ESPNow * active_instance;
 
