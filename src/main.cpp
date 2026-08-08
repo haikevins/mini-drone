@@ -47,76 +47,179 @@ static attitude_data_packet_t g_attitude_data =
     0.0f
 };
 
+/**
+ * @brief Flight target setpoints.
+ */
 static constexpr float g_target_yaw_rate = 0.0f;
 static float g_target_roll_angle = 0.0f;
 static float g_target_pitch_angle = 0.0f;
 
 static constexpr float g_direction_deg = 10.0f;
 
+
+/**
+ * @brief Shared SPI bus configuration.
+ */
 static constexpr uint8_t g_spi_pin_sck = 4u;
 static constexpr uint8_t g_spi_pin_miso = 5u;
 static constexpr uint8_t g_spi_pin_mosi = 6u;
 
+
+/**
+ * @brief MPU6500 SPI chip-select configuration.
+ */
 static constexpr uint8_t g_imu_pin_ncs = 7u;
 
+
+/**
+ * @brief ADNS3080 hardware pin configuration.
+ */
 static constexpr uint8_t g_adns_pin_ncs = 21u;
 static constexpr uint8_t g_adns_pin_rst = 20u;
 static constexpr int8_t g_adns_pin_npd = -1;
 
+
+/**
+ * @brief Shared I2C bus configuration.
+ */
 static constexpr uint8_t g_i2c_pin_sda = 8u;
 static constexpr uint8_t g_i2c_pin_scl = 9u;
 static constexpr uint32_t g_i2c_frequency_hz = 400000u;
 
+
+/**
+ * @brief ADNS3080 sampling configuration.
+ *
+ * Raw optical-flow sensor data is sampled at 200 Hz.
+ */
 static constexpr uint32_t g_adns_read_hz = 200u;
-static constexpr uint32_t g_adns_read_period_us = 1000000UL / g_adns_read_hz;
+static constexpr uint32_t g_adns_read_period_us =
+    1000000UL / g_adns_read_hz;
+
 static uint32_t g_adns_last_read_time_us = 0u;
 
+
+/**
+ * @brief VL53L1X sampling and polling configuration.
+ *
+ * Height measurements are targeted at 20 Hz.
+ * DATA READY is polled at 1 kHz when a new measurement is expected.
+ */
 static constexpr uint32_t g_vl53l1x_read_hz = 20u;
-static constexpr uint32_t g_vl53l1x_read_period_us = 1000000UL / g_vl53l1x_read_hz;
+
+static constexpr uint32_t g_vl53l1x_read_period_us =
+    1000000UL / g_vl53l1x_read_hz;
+
 static constexpr uint32_t g_vl53l1x_poll_period_us = 1000u;
+
 static uint32_t g_vl53l1x_last_read_time_us = 0u;
 static uint32_t g_vl53l1x_last_poll_time_us = 0u;
 
+
+/**
+ * @brief VL53L1X measurement configuration.
+ */
 static constexpr uint32_t g_vl53l1x_timeout_ms = 500u;
 static constexpr int16_t g_vl53l1x_offset_mm = 0;
 
+
+/**
+ * @brief MPU6500 sampling configuration.
+ */
 static constexpr float g_imu_read_default_hz = 1000.0f;
 
+
+/**
+ * @brief MPU6500 low-pass filter configuration.
+ */
 static constexpr float g_imu_gyro_lpf_alpha = 0.22f;
 static constexpr float g_imu_accel_lpf_alpha = 0.10f;
 
+
+/**
+ * @brief Madgwick filter beta configuration for each flight state.
+ */
 static constexpr float g_madgwick_beta_disarm = 0.10f;
 static constexpr float g_madgwick_beta_idle = 0.06f;
 static constexpr float g_madgwick_beta_flying = 0.03f;
 static constexpr float g_madgwick_beta_min = 0.003f;
 
+
+/**
+ * @brief Madgwick accelerometer confidence thresholds.
+ */
 static constexpr float g_madgwick_acc_error_good = 0.08f;
 static constexpr float g_madgwick_acc_error_bad = 0.25f;
 
+
+/**
+ * @brief Madgwick adaptive beta smoothing configuration.
+ */
 static constexpr float g_madgwick_beta_alpha = 0.02f;
 static constexpr float g_madgwick_confidence_min = 0.90f;
 
-static float g_madgwick_beta_current = g_madgwick_beta_disarm;
+static float g_madgwick_beta_current =
+    g_madgwick_beta_disarm;
 
-static constexpr uint32_t g_espnow_trans_period_us = 50000u; // 20 Hz
+
+/**
+ * @brief ESP-NOW telemetry transmission configuration.
+ *
+ * Telemetry packets are transmitted at 20 Hz.
+ */
+static constexpr uint32_t g_espnow_trans_period_us = 50000u;
+
 static uint32_t g_espnow_trans_last_time = 0u;
 
-static constexpr uint32_t g_espnow_heartbeat_timeout_us = 1000000u; // 1000 ms
 
-static constexpr float g_motor_throttle_base_min = 1000.0f;   // motor stop / disarmed
+/**
+ * @brief ESP-NOW heartbeat and communication failsafe configuration.
+ */
+static constexpr uint32_t g_espnow_heartbeat_timeout_us =
+    1000000u;
+
+
+/**
+ * @brief Base throttle limits.
+ *
+ * These values define the allowed base throttle range before
+ * attitude PID corrections are mixed into individual motors.
+ */
+static constexpr float g_motor_throttle_base_min = 1000.0f;
 static constexpr float g_motor_throttle_base_max = 1400.0f;
 
-static constexpr float g_motor_throttle_idle = 1100.0f;  // armed idle
-static constexpr float g_motor_throttle_min = 1000.0f;  // min throttle
-static constexpr float g_motor_throttle_max = 2000.0f;  // max throttle
 
+/**
+ * @brief Motor throttle operating limits.
+ */
+static constexpr float g_motor_throttle_idle = 1100.0f;
+static constexpr float g_motor_throttle_min = 1000.0f;
+static constexpr float g_motor_throttle_max = 2000.0f;
+
+
+/**
+ * @brief Manual throttle ramp configuration.
+ *
+ * Different rates are used when increasing and decreasing throttle.
+ */
 static constexpr float g_throttle_up_step_per_second = 200.0f;
 static constexpr float g_throttle_down_step_per_second = 60.0f;
 
+
+/**
+ * @brief Failsafe throttle ramp-down configuration.
+ */
 static constexpr float g_failsafe_throttle_step_per_second = 60.0f;
+
 static bool g_failsafe_active = false;
 
-static float g_motor_throttle_base = g_motor_throttle_idle;
+
+/**
+ * @brief Current motor throttle state.
+ */
+static float g_motor_throttle_base =
+    g_motor_throttle_idle;
+
 static bool g_was_armed = false;
 
 static void setup_spi_bus();
