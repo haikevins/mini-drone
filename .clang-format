@@ -1,0 +1,26 @@
+# Explicit C++ + Allman style for Mini Drone.
+# clang-format controls layout only. Explicit == true/false and mandatory
+# braces are conventions documented in CODE_STYLE.md, not clang-format rules.
+BasedOnStyle: LLVM
+Language: Cpp
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+BreakBeforeBraces: Allman
+IndentCaseLabels: true
+ColumnLimit: 120
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+SpaceBeforeParens: ControlStatements
+PointerAlignment: Right
+ReferenceAlignment: Right
+BinPackArguments: false
+BinPackParameters: false
+SortIncludes: Never
+ReflowComments: false
+AccessModifierOffset: -4
+MaxEmptyLinesToKeep: 1
+KeepEmptyLinesAtTheStartOfBlocks: false
