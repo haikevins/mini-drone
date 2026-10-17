@@ -15,6 +15,7 @@
 
 #include "communication/espnow.h"
 #include "communication/espnow_protocol.h"
+#include "communication/flight_link_safety.h"
 
 #include "hal/motors.h"
 #include "hal/i2c_bus.h"
@@ -31,7 +32,7 @@ static Madgwick g_madgwick;
 static Motors g_motors;
 
 // kp, ki, kd, integLimit, outputLimit, dFilterAlpha
-static PIDController g_pid_roll_angle(5.0f, 0.1f, 0.01f, 10.0f, 100.0f, 0.5f); 
+static PIDController g_pid_roll_angle(5.0f, 0.1f, 0.01f, 10.0f, 100.0f, 0.5f);
 static PIDController g_pid_pitch_angle(5.0f, 0.1f, 0.01f, 10.0f, 100.0f, 0.5f);
 
 static PIDController g_pid_roll_rate(3.0f, 0.01f, 0.005f, 10.0f, 100.0f, 0.5f);
@@ -40,12 +41,7 @@ static PIDController g_pid_yaw_rate(3.0f, 0.01f, 0.005f, 10.0f, 100.0f, 0.5f);
 
 static ESPNow g_espnow;
 
-static attitude_data_packet_t g_attitude_data =
-{
-    0.0f,
-    0.0f,
-    0.0f
-};
+static attitude_data_packet_t g_attitude_data = {0.0f, 0.0f, 0.0f};
 
 /**
  * @brief Flight target setpoints.
@@ -56,7 +52,6 @@ static float g_target_pitch_angle = 0.0f;
 
 static constexpr float g_direction_deg = 10.0f;
 
-
 /**
  * @brief Shared SPI bus configuration.
  */
@@ -64,12 +59,10 @@ static constexpr uint8_t g_spi_pin_sck = 4u;
 static constexpr uint8_t g_spi_pin_miso = 5u;
 static constexpr uint8_t g_spi_pin_mosi = 6u;
 
-
 /**
  * @brief MPU6500 SPI chip-select configuration.
  */
 static constexpr uint8_t g_imu_pin_ncs = 7u;
-
 
 /**
  * @brief ADNS3080 hardware pin configuration.
@@ -78,14 +71,12 @@ static constexpr uint8_t g_adns_pin_ncs = 21u;
 static constexpr uint8_t g_adns_pin_rst = 20u;
 static constexpr int8_t g_adns_pin_npd = -1;
 
-
 /**
  * @brief Shared I2C bus configuration.
  */
 static constexpr uint8_t g_i2c_pin_sda = 8u;
 static constexpr uint8_t g_i2c_pin_scl = 9u;
 static constexpr uint32_t g_i2c_frequency_hz = 400000u;
-
 
 /**
  * @brief ADNS3080 sampling configuration.
@@ -96,7 +87,6 @@ static constexpr uint32_t g_adns_read_hz = 200u;
 static constexpr uint32_t g_adns_read_period_us = 1000000ul / g_adns_read_hz;
 
 static uint32_t g_adns_last_read_time_us = 0u;
-
 
 /**
  * @brief VL53L1X sampling and polling configuration.
@@ -113,26 +103,22 @@ static constexpr uint32_t g_vl53l1x_poll_period_us = 1000u;
 static uint32_t g_vl53l1x_last_read_time_us = 0u;
 static uint32_t g_vl53l1x_last_poll_time_us = 0u;
 
-
 /**
  * @brief VL53L1X measurement configuration.
  */
 static constexpr uint32_t g_vl53l1x_timeout_ms = 500u;
 static constexpr int16_t g_vl53l1x_offset_mm = 0;
 
-
 /**
  * @brief MPU6500 sampling configuration.
  */
 static constexpr float g_imu_read_default_hz = 1000.0f;
-
 
 /**
  * @brief MPU6500 low-pass filter configuration.
  */
 static constexpr float g_imu_gyro_lpf_alpha = 0.22f;
 static constexpr float g_imu_accel_lpf_alpha = 0.10f;
-
 
 /**
  * @brief Madgwick filter beta configuration for each flight state.
@@ -142,13 +128,11 @@ static constexpr float g_madgwick_beta_idle = 0.06f;
 static constexpr float g_madgwick_beta_flying = 0.03f;
 static constexpr float g_madgwick_beta_min = 0.003f;
 
-
 /**
  * @brief Madgwick accelerometer confidence thresholds.
  */
 static constexpr float g_madgwick_acc_error_good = 0.08f;
 static constexpr float g_madgwick_acc_error_bad = 0.25f;
-
 
 /**
  * @brief Madgwick adaptive beta smoothing configuration.
@@ -158,7 +142,6 @@ static constexpr float g_madgwick_confidence_min = 0.90f;
 
 static float g_madgwick_beta_current = g_madgwick_beta_disarm;
 
-
 /**
  * @brief ESP-NOW telemetry transmission configuration.
  *
@@ -167,13 +150,16 @@ static float g_madgwick_beta_current = g_madgwick_beta_disarm;
 static constexpr uint32_t g_espnow_trans_period_us = 50000u;
 
 static uint32_t g_espnow_trans_last_time = 0u;
-
+static constexpr uint32_t g_status_trans_period_us = 200000u; // 5 Hz
+static uint32_t g_status_trans_last_time = 0u;
 
 /**
  * @brief ESP-NOW heartbeat and communication failsafe configuration.
  */
 static constexpr uint32_t g_espnow_heartbeat_timeout_us = 1000000u;
-
+static constexpr uint32_t g_espnow_command_timeout_us = 500000u;
+static FlightLinkSafety g_link_safety;
+static bool g_flight_armed = false; // Actual ARM state, not requested ARM bit.
 
 /**
  * @brief Base throttle limits.
@@ -184,14 +170,12 @@ static constexpr uint32_t g_espnow_heartbeat_timeout_us = 1000000u;
 static constexpr float g_motor_throttle_base_min = 1000.0f;
 static constexpr float g_motor_throttle_base_max = 1400.0f;
 
-
 /**
  * @brief Motor throttle operating limits.
  */
 static constexpr float g_motor_throttle_idle = 1100.0f;
 static constexpr float g_motor_throttle_min = 1000.0f;
 static constexpr float g_motor_throttle_max = 2000.0f;
-
 
 /**
  * @brief Manual throttle ramp configuration.
@@ -201,7 +185,6 @@ static constexpr float g_motor_throttle_max = 2000.0f;
 static constexpr float g_throttle_up_step_per_second = 200.0f;
 static constexpr float g_throttle_down_step_per_second = 60.0f;
 
-
 /**
  * @brief Failsafe throttle ramp-down configuration.
  */
@@ -209,13 +192,24 @@ static constexpr float g_failsafe_throttle_step_per_second = 60.0f;
 
 static bool g_failsafe_active = false;
 
-
 /**
  * @brief Current motor throttle state.
  */
 static float g_motor_throttle_base = g_motor_throttle_idle;
 
 static bool g_was_armed = false;
+
+/**
+ * @brief MPU6500 data watchdog.
+ *
+ * Radio failsafe keeps its existing ramp to idle (1100). An IMU fault is
+ * different: without attitude feedback, motors are cut to OFF (1000).
+ * The fault stays latched until valid IMU samples and a fresh DISARM arrive.
+ */
+static constexpr uint32_t g_imu_data_timeout_us = 150000u;
+static uint32_t g_imu_last_valid_us = 0u;
+static bool g_imu_seen_valid = false;
+static bool g_imu_fault_latched = false;
 
 static void setup_spi_bus();
 static void setup_i2c_bus();
@@ -228,8 +222,10 @@ static void setup_espnow();
 static float accel_confidence(float ax, float ay, float az);
 static float update_madgwick_beta(float ax, float ay, float az);
 
-static void update_attitude_target();
+static void update_attitude_target(const command_data_packet_t &cmd);
 static void reset_attitude_target();
+static void send_flight_status(
+    const ESPNowRxSnapshot &rx, uint32_t rx_check_now, bool cmd_recent, bool hb_recent, FlightLinkReason reason);
 
 void setup()
 {
@@ -245,64 +241,164 @@ void setup()
     setup_espnow();
 
     g_motors.setup_motors();
+    g_imu_last_valid_us = micros();
 }
 
 void loop()
 {
     const uint32_t now = micros();
 
-    /*
-     * 1000 Hz flight control.
-     */
-    if (g_imu.update() == false)
+    // Check the remote link on EVERY pass, including passes without a new
+    // IMU sample. IMU sampling must never block DISARM, timeout or status.
+    const ESPNowRxSnapshot reset_rx = g_espnow.get_rx_snapshot();
+    const uint32_t reset_check_now = micros();
+    if ((reset_rx.command.reset == true) &&
+        (ESPNow::is_fresh(
+             reset_check_now, reset_rx.last_command_us, reset_rx.have_command, g_espnow_command_timeout_us) == true))
     {
+        g_motor_throttle_base = g_motor_throttle_idle;
+        g_motors.write_all_motors(g_motor_throttle_base_min);
+        g_espnow.reset_command();
+        delay(100);
+        esp_restart();
         return;
     }
 
-    const auto& imu_data = g_imu.get_filtered();
-    const auto& imu_dt = g_imu.get_timing().dt;
+    const ESPNowRxSnapshot rx = g_espnow.get_rx_snapshot();
+    const uint32_t rx_check_now = micros();
+    const bool hb_recent =
+        (ESPNow::is_fresh(rx_check_now, rx.last_heartbeat_us, rx.have_heartbeat, g_espnow_heartbeat_timeout_us) ==
+         true);
+    const bool cmd_recent =
+        (ESPNow::is_fresh(rx_check_now, rx.last_command_us, rx.have_command, g_espnow_command_timeout_us) == true);
 
-    const float beta = update_madgwick_beta(
-        imu_data.ax,
-        imu_data.ay,
-        imu_data.az
-    );
+    const bool sticks_neutral = ((rx.command.throttle_up == false) && (rx.command.throttle_down == false) &&
+                                 (rx.command.direction_forward == false) && (rx.command.direction_backward == false) &&
+                                 (rx.command.direction_left == false) && (rx.command.direction_right == false));
+    const FlightLinkResult link = g_link_safety.update({cmd_recent, hb_recent, rx.command.arm, sticks_neutral});
 
+    // A false return normally means "no NEW IMU sample yet", not a fault.
+    // Only a prolonged absence of valid samples, or invalid IMU data, faults.
+    const bool imu_updated = (g_imu.update() == true);
+    bool imu_sample_valid = false;
+    if (imu_updated == true)
+    {
+        const auto &sample = g_imu.get_filtered();
+        const float sample_dt = g_imu.get_timing().dt;
+        imu_sample_valid =
+            ((static_cast<bool>(isfinite(sample.ax)) == true) && (static_cast<bool>(isfinite(sample.ay)) == true) &&
+             (static_cast<bool>(isfinite(sample.az)) == true) && (static_cast<bool>(isfinite(sample.gx)) == true) &&
+             (static_cast<bool>(isfinite(sample.gy)) == true) && (static_cast<bool>(isfinite(sample.gz)) == true) &&
+             (static_cast<bool>(isfinite(sample_dt)) == true) && (sample_dt > 0.0f) && (sample_dt < 0.1f));
+        if (imu_sample_valid == true)
+        {
+            g_imu_last_valid_us = micros();
+            g_imu_seen_valid = true;
+        }
+    }
+
+    const bool imu_recent =
+        ((g_imu_seen_valid == true) && (uint32_t(micros() - g_imu_last_valid_us) <= g_imu_data_timeout_us));
+    if (((imu_updated == true) && (imu_sample_valid == false)) ||
+        (uint32_t(micros() - g_imu_last_valid_us) > g_imu_data_timeout_us))
+    {
+        if (g_imu_fault_latched == false)
+        {
+            Serial.println("[FLIGHT IMU FAILSAFE] Invalid/stale MPU6500 data; MOTOR OFF=1000");
+        }
+
+        g_imu_fault_latched = true;
+    }
+
+    // A valid sample and a NEW DISARM command are required to clear the IMU
+    // fault. FlightLinkSafety independently requires a DISARM -> ARM edge.
+    if ((g_imu_fault_latched == true) && (imu_sample_valid == true) && (imu_recent == true) && (cmd_recent == true) &&
+        (rx.command.arm == false))
+    {
+        g_imu_fault_latched = false;
+        Serial.println("[FLIGHT IMU RECOVERED] Fresh DISARM accepted; ARM again manually");
+    }
+
+    g_flight_armed = ((link.armed == true) && (imu_recent == true) && (g_imu_fault_latched == false));
+    g_failsafe_active = ((link.failsafe == true) || (g_imu_fault_latched == true));
+    if (link.entered_failsafe == true)
+    {
+        reset_attitude_target();
+        Serial.printf("[FLIGHT FAILSAFE] reason=%u cmd_fresh=%u hb_fresh=%u\n",
+                      unsigned(link.reason),
+                      unsigned(cmd_recent),
+                      unsigned(hb_recent));
+    }
+
+    if ((link.just_armed == true) && (imu_recent == true) && (g_imu_fault_latched == false))
+    {
+        Serial.println("[FLIGHT ARM ACK] actual_arm=1");
+    }
+
+    if (link.just_disarmed == true)
+    {
+        Serial.println("[FLIGHT ARM ACK] actual_arm=0");
+    }
+
+    // DISARM must cut outputs even when the IMU has no new sample.
+    if (g_flight_armed == false)
+    {
+        g_motors.write_all_motors(g_motor_throttle_min);
+    }
+
+    const FlightLinkReason status_reason = (g_imu_fault_latched == true) ? FlightLinkReason::IMU_TIMEOUT : link.reason;
+
+    if (g_imu_fault_latched == true)
+    {
+        // No attitude feedback: do NOT continue the normal radio failsafe
+        // ramp or reuse stale PID outputs. Immediately command all motors OFF.
+        g_was_armed = false;
+        g_motor_throttle_base = g_motor_throttle_idle;
+        reset_attitude_target();
+        setup_pid();
+        g_motors.write_all_motors(g_motor_throttle_min);
+        send_flight_status(rx, rx_check_now, cmd_recent, hb_recent, status_reason);
+        return;
+    }
+
+    if (imu_sample_valid == false)
+    {
+        send_flight_status(rx, rx_check_now, cmd_recent, hb_recent, status_reason);
+        return;
+    }
+
+    const auto &imu_data = g_imu.get_filtered();
+    const float imu_dt = g_imu.get_timing().dt;
+
+    const float beta = update_madgwick_beta(imu_data.ax, imu_data.ay, imu_data.az);
     g_madgwick.setBeta(beta);
-
-    g_madgwick.updateIMUdt(
-        imu_data.gx,
-        imu_data.gy,
-        imu_data.gz,
-        imu_data.ax,
-        imu_data.ay,
-        imu_data.az,
-        imu_dt
-    );
-
+    g_madgwick.updateIMUdt(imu_data.gx, imu_data.gy, imu_data.gz, imu_data.ax, imu_data.ay, imu_data.az, imu_dt);
     g_attitude_data.roll = g_madgwick.getRoll();
     g_attitude_data.pitch = g_madgwick.getPitch();
     g_attitude_data.yaw = g_madgwick.getYaw();
 
-    if (g_espnow.is_reset() == true) 
-    { 
-        g_motor_throttle_base = g_motor_throttle_idle; 
-        g_motors.write_all_motors(g_motor_throttle_base_min);
-        g_espnow.reset_command(); 
-        
-        delay(100); 
-        esp_restart();
-         
-        return; 
-    }
-
-    const bool is_heartbeat_recent = g_espnow.is_heartbeat_recent(g_espnow_heartbeat_timeout_us);
-    if ((g_espnow.is_armed() == true) && (is_heartbeat_recent == false))
+    if ((isfinite(g_attitude_data.roll) == false) || (isfinite(g_attitude_data.pitch) == false) ||
+        (isfinite(g_attitude_data.yaw) == false))
     {
+        g_imu_fault_latched = true;
+        g_flight_armed = false;
         g_failsafe_active = true;
+        g_was_armed = false;
+        g_motor_throttle_base = g_motor_throttle_idle;
+        reset_attitude_target();
+        setup_pid();
+        g_motors.write_all_motors(g_motor_throttle_min);
+
+        // Restart only a corrupted filter state; Madgwick math and tuning stay unchanged.
+        g_madgwick = Madgwick();
+        g_madgwick.begin(g_imu_read_default_hz);
+        g_madgwick.setBeta(g_madgwick_beta_current);
+        Serial.println("[FLIGHT IMU FAILSAFE] Invalid Madgwick attitude; MOTOR OFF=1000");
+        send_flight_status(rx, rx_check_now, cmd_recent, hb_recent, FlightLinkReason::IMU_TIMEOUT);
+        return;
     }
 
-    if ((g_espnow.is_armed() == true) && (g_failsafe_active == true))
+    if ((g_flight_armed == true) && (g_failsafe_active == true))
     {
         g_motor_throttle_base -= g_failsafe_throttle_step_per_second * imu_dt;
         g_motor_throttle_base = max(g_motor_throttle_base, g_motor_throttle_idle);
@@ -311,31 +407,21 @@ void loop()
         if (apply_pid == true)
         {
             // Angle PID: attitude angle error -> target angular rate.
-            const float roll_rate_sp = g_pid_roll_angle.update(
-                g_target_roll_angle,
-                g_attitude_data.roll,
-                imu_dt,
-                false,
-                true
-            );
+            const float roll_rate_sp =
+                g_pid_roll_angle.update(g_target_roll_angle, g_attitude_data.roll, imu_dt, false, true);
 
-            const float pitch_rate_sp = g_pid_pitch_angle.update(
-                g_target_pitch_angle,
-                g_attitude_data.pitch,
-                imu_dt,
-                false,
-                true
-            );
+            const float pitch_rate_sp =
+                g_pid_pitch_angle.update(g_target_pitch_angle, g_attitude_data.pitch, imu_dt, false, true);
 
             // Rate PID: target angular rate - gyro rate -> motor correction.
             float roll_output = g_pid_roll_rate.update(roll_rate_sp, imu_data.gx, imu_dt, false, true);
             float pitch_output = g_pid_pitch_rate.update(pitch_rate_sp, imu_data.gy, imu_dt, false, true);
             float yaw_output = g_pid_yaw_rate.update(g_target_yaw_rate, imu_data.gz, imu_dt, false, true);
 
-            float motor1_speed = g_motor_throttle_base + roll_output - pitch_output + yaw_output; // front left
+            float motor1_speed = g_motor_throttle_base + roll_output - pitch_output + yaw_output;         // front left
             float motor2_speed = g_motor_throttle_base - roll_output - pitch_output - yaw_output + 60.0f; // front right
             float motor3_speed = g_motor_throttle_base - roll_output + pitch_output + yaw_output + 120.0f; // rear right
-            float motor4_speed = g_motor_throttle_base + roll_output + pitch_output - yaw_output + 10.0f; // rear left
+            float motor4_speed = g_motor_throttle_base + roll_output + pitch_output - yaw_output + 10.0f;  // rear left
 
             float max_motor_speed = max(max(motor1_speed, motor2_speed), max(motor3_speed, motor4_speed));
             if (max_motor_speed > g_motor_throttle_max)
@@ -357,20 +443,15 @@ void loop()
                 motor4_speed += diff;
             }
 
-            g_motors.write_motors(
-                motor1_speed,
-                motor2_speed,
-                motor3_speed,
-                motor4_speed
-            );
+            g_motors.write_motors(motor1_speed, motor2_speed, motor3_speed, motor4_speed);
         }
         else
         {
             setup_pid();
             g_motors.write_all_motors(g_motor_throttle_idle);
-        }            
-    }    
-    else if ((g_espnow.is_armed() == true) && (g_failsafe_active == false))
+        }
+    }
+    else if ((g_flight_armed == true) && (g_failsafe_active == false))
     {
         if (g_was_armed == false)
         {
@@ -378,48 +459,38 @@ void loop()
             g_was_armed = true;
         }
 
-        if (g_espnow.is_throttle_up() == true)
+        if (rx.command.throttle_up == true)
         {
             g_motor_throttle_base += g_throttle_up_step_per_second * imu_dt;
-        }        
-        else if (g_espnow.is_throttle_down() == true)
+        }
+        else if (rx.command.throttle_down == true)
         {
             g_motor_throttle_base -= g_throttle_down_step_per_second * imu_dt;
         }
 
         g_motor_throttle_base = constrain(g_motor_throttle_base, g_motor_throttle_idle, g_motor_throttle_base_max);
 
-        update_attitude_target();
+        update_attitude_target(rx.command);
 
         const bool apply_pid = (g_motor_throttle_base > (g_motor_throttle_idle + 1.0f));
         if (apply_pid == true)
         {
             // Angle PID: attitude angle error -> target angular rate.
-            const float roll_rate_sp = g_pid_roll_angle.update(
-                g_target_roll_angle,
-                g_attitude_data.roll,
-                imu_dt,
-                false,
-                true
-            );
+            const float roll_rate_sp =
+                g_pid_roll_angle.update(g_target_roll_angle, g_attitude_data.roll, imu_dt, false, true);
 
-            const float pitch_rate_sp = g_pid_pitch_angle.update(
-                g_target_pitch_angle,
-                g_attitude_data.pitch,
-                imu_dt,
-                false,
-                true
-            );
+            const float pitch_rate_sp =
+                g_pid_pitch_angle.update(g_target_pitch_angle, g_attitude_data.pitch, imu_dt, false, true);
 
             // Rate PID: target angular rate - gyro rate -> motor correction.
             float roll_output = g_pid_roll_rate.update(roll_rate_sp, imu_data.gx, imu_dt, false, true);
             float pitch_output = g_pid_pitch_rate.update(pitch_rate_sp, imu_data.gy, imu_dt, false, true);
             float yaw_output = g_pid_yaw_rate.update(g_target_yaw_rate, imu_data.gz, imu_dt, false, true);
 
-            float motor1_speed = g_motor_throttle_base + roll_output - pitch_output + yaw_output; // front left
+            float motor1_speed = g_motor_throttle_base + roll_output - pitch_output + yaw_output;         // front left
             float motor2_speed = g_motor_throttle_base - roll_output - pitch_output - yaw_output + 60.0f; // front right
             float motor3_speed = g_motor_throttle_base - roll_output + pitch_output + yaw_output + 120.0f; // rear right
-            float motor4_speed = g_motor_throttle_base + roll_output + pitch_output - yaw_output + 10.0f; // rear left
+            float motor4_speed = g_motor_throttle_base + roll_output + pitch_output - yaw_output + 10.0f;  // rear left
 
             float max_motor_speed = max(max(motor1_speed, motor2_speed), max(motor3_speed, motor4_speed));
             if (max_motor_speed > g_motor_throttle_max)
@@ -441,12 +512,7 @@ void loop()
                 motor4_speed += diff;
             }
 
-            g_motors.write_motors(
-                motor1_speed,
-                motor2_speed,
-                motor3_speed,
-                motor4_speed
-            );
+            g_motors.write_motors(motor1_speed, motor2_speed, motor3_speed, motor4_speed);
         }
         else
         {
@@ -454,21 +520,53 @@ void loop()
             g_motors.write_all_motors(g_motor_throttle_idle);
         }
     }
-    else if (g_espnow.is_armed() == false)
+    else if (g_flight_armed == false)
     {
         g_was_armed = false;
         g_motor_throttle_base = g_motor_throttle_idle;
         reset_attitude_target();
         setup_pid();
         g_motors.write_all_motors(g_motor_throttle_base_min);
-        g_failsafe_active = false;
+
+        // Failsafe latch is cleared ONLY by a fresh DISARM packet in FlightLinkSafety.
     }
 
     if (now - g_espnow_trans_last_time >= g_espnow_trans_period_us)
     {
         g_espnow_trans_last_time = now;
-        g_espnow.send_attitude(g_attitude_data);
+        g_espnow.send_attitude(g_attitude_data); // Legacy 12-byte attitude packet unchanged.
     }
+
+    send_flight_status(rx, rx_check_now, cmd_recent, hb_recent, status_reason);
+}
+
+static void send_flight_status(
+    const ESPNowRxSnapshot &rx, uint32_t rx_check_now, bool cmd_recent, bool hb_recent, FlightLinkReason reason)
+{
+    const uint32_t now = micros();
+
+    // Keep the original 5 Hz status and stagger it from attitude telemetry.
+    if ((uint32_t(now - g_status_trans_last_time) < g_status_trans_period_us) ||
+        (uint32_t(now - g_espnow_trans_last_time) < 12000u))
+    {
+        return;
+    }
+
+    g_status_trans_last_time = now;
+    const bool imu_ready = ((g_imu_fault_latched == false) && (g_imu_seen_valid == true) &&
+                            (uint32_t(now - g_imu_last_valid_us) <= g_imu_data_timeout_us));
+    const flight_status_packet_t status = {
+        FLIGHT_STATUS_MAGIC,
+        millis(),
+        (rx.have_command == true) ? (uint32_t(rx_check_now - rx.last_command_us) / 1000u) : UINT32_MAX,
+        uint16_t((g_flight_armed == true) ? g_motor_throttle_base : g_motor_throttle_min),
+        uint8_t(((g_flight_armed == true) ? FLIGHT_STATUS_ARMED : 0u) |
+                ((g_failsafe_active == true) ? FLIGHT_STATUS_FAILSAFE : 0u) |
+                ((hb_recent == true) ? FLIGHT_STATUS_HB_RECENT : 0u) |
+                ((cmd_recent == true) ? FLIGHT_STATUS_CMD_RECENT : 0u) |
+                ((imu_ready == true) ? FLIGHT_STATUS_IMU_READY : 0u)),
+        uint8_t(reason)};
+    g_espnow.send_status(status);
 }
 
 static void reset_attitude_target()
@@ -477,25 +575,25 @@ static void reset_attitude_target()
     g_target_pitch_angle = 0.0f;
 }
 
-static void update_attitude_target()
+static void update_attitude_target(const command_data_packet_t &cmd)
 {
     float roll_target = 0.0f;
     float pitch_target = 0.0f;
 
-    if (g_espnow.is_direction_left() == true)
+    if (cmd.direction_left == true)
     {
         roll_target = -g_direction_deg;
     }
-    else if (g_espnow.is_direction_right() == true)
+    else if (cmd.direction_right == true)
     {
         roll_target = g_direction_deg;
     }
 
-    if (g_espnow.is_direction_forward() == true)
+    if (cmd.direction_forward == true)
     {
         pitch_target = g_direction_deg;
     }
-    else if (g_espnow.is_direction_backward() == true)
+    else if (cmd.direction_backward == true)
     {
         pitch_target = -g_direction_deg;
     }
@@ -526,7 +624,7 @@ static float update_madgwick_beta(float ax, float ay, float az)
 {
     const float acc_confidence = accel_confidence(ax, ay, az);
 
-    const bool is_armed = g_espnow.is_armed();
+    const bool is_armed = (g_flight_armed == true);
     const bool is_disarmed = ((is_armed == false) && (acc_confidence >= g_madgwick_confidence_min));
     const bool is_flying = ((is_armed == true) && (g_motor_throttle_base >= g_motor_throttle_idle + 100.0f));
 
@@ -563,44 +661,39 @@ void setup_spi_bus()
     pinMode(g_adns_pin_ncs, OUTPUT);
     digitalWrite(g_adns_pin_ncs, HIGH);
 
-    const bool b_spi_ready = g_spi_bus.begin(
-        g_spi_pin_sck,
-        g_spi_pin_miso,
-        g_spi_pin_mosi
-    );
+    const bool b_spi_ready = (g_spi_bus.begin(g_spi_pin_sck, g_spi_pin_miso, g_spi_pin_mosi) == true);
 
     if (b_spi_ready == false)
     {
         Serial.println("SPI BUS INIT FAILED");
-        for (;;) {}
+        for (;;)
+        {
+        }
     }
 }
 
 void setup_i2c_bus()
 {
-    const bool b_i2c_ready = g_i2c_bus.begin(
-        g_i2c_pin_sda,
-        g_i2c_pin_scl,
-        g_i2c_frequency_hz
-    );
+    const bool b_i2c_ready = (g_i2c_bus.begin(g_i2c_pin_sda, g_i2c_pin_scl, g_i2c_frequency_hz) == true);
 
     if (b_i2c_ready == false)
     {
         Serial.println("I2C BUS INIT FAILED");
-        for (;;) {}
+        for (;;)
+        {
+        }
     }
 }
 
 void setup_imu()
 {
-    const bool b_imu_ready = g_imu.begin(
-        &g_spi_bus,
-        g_imu_pin_ncs
-    );
+    const bool b_imu_ready = (g_imu.begin(&g_spi_bus, g_imu_pin_ncs) == true);
     if (b_imu_ready == false)
     {
         Serial.println("MPU6500 NOT DETECTED");
-        for (;;) {}
+        for (;;)
+        {
+        }
     }
     else
     {
@@ -629,6 +722,7 @@ void setup_imu()
         {
             Serial.println("Accel calibration FAILED");
         }
+
     */
     g_imu.calibrate_accel_once();
 
@@ -641,17 +735,14 @@ void setup_imu()
 
 void setup_adns()
 {
-    const bool b_adns_ready = g_adns.begin(
-        &g_spi_bus,
-        g_adns_pin_ncs,
-        g_adns_pin_rst,
-        g_adns_pin_npd
-    );
+    const bool b_adns_ready = (g_adns.begin(&g_spi_bus, g_adns_pin_ncs, g_adns_pin_rst, g_adns_pin_npd) == true);
 
     if (b_adns_ready == false)
     {
         Serial.println("ADNS3080 NOT DETECTED");
-        for (;;) {}
+        for (;;)
+        {
+        }
     }
     else
     {
@@ -661,18 +752,16 @@ void setup_adns()
 
 void setup_vl53l1x()
 {
-    const bool b_vl53l1x_ready = g_vl53l1x.begin(
-        &g_i2c_bus,
-        VL53L1X::default_i2c_address,
-        g_vl53l1x_timeout_ms,
-        g_vl53l1x_offset_mm
-    );
+    const bool b_vl53l1x_ready =
+        (g_vl53l1x.begin(&g_i2c_bus, VL53L1X::default_i2c_address, g_vl53l1x_timeout_ms, g_vl53l1x_offset_mm) == true);
 
     if (b_vl53l1x_ready == false)
     {
         Serial.print("VL53L1X INIT FAILED: ");
         Serial.println(g_vl53l1x.get_init_error_string());
-        for (;;) {}
+        for (;;)
+        {
+        }
     }
     else
     {
@@ -692,22 +781,26 @@ void setup_pid()
 
 void setup_espnow()
 {
-    const bool b_espnow_ready = g_espnow.begin();
+    const bool b_espnow_ready = (g_espnow.begin() == true);
     if (b_espnow_ready == false)
     {
         Serial.println("ESP-NOW INIT FAILED");
-        for (;;) {}
+        for (;;)
+        {
+        }
     }
     else
     {
         Serial.println("ESP-NOW INIT SUCCESS");
     }
 
-    const bool b_peer_registered = g_espnow.register_peer();
+    const bool b_peer_registered = (g_espnow.register_peer() == true);
     if (b_peer_registered == false)
     {
         Serial.println("ESP-NOW PEER REGISTRATION FAILED");
-        for (;;) {}
+        for (;;)
+        {
+        }
     }
     else
     {

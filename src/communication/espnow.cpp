@@ -1,13 +1,17 @@
 #include "communication/espnow.h"
 
-ESPNow * ESPNow::active_instance = nullptr;
+ESPNow *ESPNow::active_instance = nullptr;
 
-ESPNow::ESPNow() :
-    command_data{false, false, false, false, false, false, false, false},
-    heartbeat_data{0u},
+// ESP-NOW callbacks run in the Wi-Fi task. Snapshot the shared command/timestamps
+// under a short critical section instead of reading a half-updated packet.
+static portMUX_TYPE s_rx_mux = portMUX_INITIALIZER_UNLOCKED;
 
-    last_heartbeat_receive_time_us(0u)
-{}
+ESPNow::ESPNow()
+    : command_data{false, false, false, false, false, false, false, false}, heartbeat_data{0u},
+
+      last_heartbeat_receive_time_us(0u), last_command_receive_time_us(0u), have_heartbeat(false), have_command(false)
+{
+}
 
 bool ESPNow::begin()
 {
@@ -22,11 +26,11 @@ bool ESPNow::begin()
     active_instance = this;
     register_send_callback(ESPNow::on_data_sent);
     register_recv_callback(ESPNow::on_data_recv);
-    
+
     return true;
 }
 
-bool ESPNow::send(const uint8_t* data, size_t len)
+bool ESPNow::send(const uint8_t *data, size_t len)
 {
     if (esp_now_send(controller_address, data, len) == ESP_OK)
     {
@@ -36,53 +40,77 @@ bool ESPNow::send(const uint8_t* data, size_t len)
     return false;
 }
 
-bool ESPNow::send_attitude(const attitude_data_packet_t & attitude_data)
+bool ESPNow::send_attitude(const attitude_data_packet_t &attitude_data)
 {
-    return send(reinterpret_cast<const uint8_t*>(&attitude_data), sizeof(attitude_data));
+    return (send(reinterpret_cast<const uint8_t *>(&attitude_data), sizeof(attitude_data)));
+}
+
+bool ESPNow::send_status(const flight_status_packet_t &status_data)
+{
+    return (send(reinterpret_cast<const uint8_t *>(&status_data), sizeof(status_data)));
+}
+
+ESPNowRxSnapshot ESPNow::get_rx_snapshot() const
+{
+    ESPNowRxSnapshot out{};
+    portENTER_CRITICAL(&s_rx_mux);
+    out.command = command_data;
+    out.last_command_us = last_command_receive_time_us;
+    out.last_heartbeat_us = last_heartbeat_receive_time_us;
+    out.have_command = (have_command == true);
+    out.have_heartbeat = (have_heartbeat == true);
+    portEXIT_CRITICAL(&s_rx_mux);
+    return out;
+}
+
+bool ESPNow::is_fresh(uint32_t now_us, uint32_t last_us, bool seen, uint32_t timeout_us)
+{
+    return ((seen == true) && (uint32_t(now_us - last_us) <= timeout_us));
 }
 
 bool ESPNow::is_armed() const
 {
-    return command_data.arm;
+    return (get_rx_snapshot().command.arm == true);
 }
 
-bool ESPNow :: is_reset() const
+bool ESPNow ::is_reset() const
 {
-    return command_data.reset;
+    return get_rx_snapshot().command.reset;
 }
 
-bool ESPNow :: is_throttle_up() const
+bool ESPNow ::is_throttle_up() const
 {
-    return command_data.throttle_up;
+    return get_rx_snapshot().command.throttle_up;
 }
 
-bool ESPNow :: is_throttle_down() const
+bool ESPNow ::is_throttle_down() const
 {
-    return command_data.throttle_down;
+    return get_rx_snapshot().command.throttle_down;
 }
 
-bool ESPNow :: is_direction_forward() const
+bool ESPNow ::is_direction_forward() const
 {
-    return command_data.direction_forward;
+    return get_rx_snapshot().command.direction_forward;
 }
 
-bool ESPNow :: is_direction_backward() const
+bool ESPNow ::is_direction_backward() const
 {
-    return command_data.direction_backward;
+    return get_rx_snapshot().command.direction_backward;
 }
 
-bool ESPNow :: is_direction_left() const
+bool ESPNow ::is_direction_left() const
 {
-    return command_data.direction_left;
+    return get_rx_snapshot().command.direction_left;
 }
 
-bool ESPNow :: is_direction_right() const
+bool ESPNow ::is_direction_right() const
 {
-    return command_data.direction_right;
+    return get_rx_snapshot().command.direction_right;
 }
 
-void ESPNow :: reset_command()
+void ESPNow ::reset_command()
 {
+    portENTER_CRITICAL(&s_rx_mux);
     command_data.arm = false;
     command_data.reset = false;
 
@@ -93,16 +121,18 @@ void ESPNow :: reset_command()
     command_data.direction_backward = false;
     command_data.direction_left = false;
     command_data.direction_right = false;
+    portEXIT_CRITICAL(&s_rx_mux);
 }
 
-const command_data_packet_t & ESPNow::get_command_data() const
+command_data_packet_t ESPNow::get_command_data() const
 {
-    return command_data;
+    return get_rx_snapshot().command;
 }
 
 bool ESPNow::is_heartbeat_recent(uint32_t timeout_us) const
 {
-    return (micros() - last_heartbeat_receive_time_us) <= timeout_us;
+    const ESPNowRxSnapshot snap = get_rx_snapshot();
+    return (is_fresh(micros(), snap.last_heartbeat_us, snap.have_heartbeat, timeout_us) == true);
 }
 
 void ESPNow::register_recv_callback(esp_now_recv_cb_t callback)
@@ -123,26 +153,41 @@ void ESPNow::on_data_sent(const wifi_tx_info_t *info, esp_now_send_status_t stat
 
 void ESPNow::on_data_recv(const esp_now_recv_info_t *info, const uint8_t *data, int data_len)
 {
-    (void)info;
-
-    if ((active_instance == nullptr) || (data == nullptr))
+    if ((active_instance == nullptr) || (data == nullptr) || (info == nullptr) || (info->src_addr == nullptr))
     {
         return;
     }
 
-    ESPNow * self = active_instance;
-    const uint32_t now = micros();
+    ESPNow *self = active_instance;
 
-    if (data_len == static_cast<int>(sizeof(self->command_data)))
+    // Accept control packets ONLY from the configured remote's STA MAC.
+    if (memcmp(info->src_addr, self->controller_address, 6) != 0)
     {
-        memcpy(&self->command_data, data, sizeof(self->command_data));
+        return;
+    }
+
+    const uint32_t now = micros();
+    if (data_len == static_cast<int>(sizeof(command_data_packet_t)))
+    {
+        command_data_packet_t cmd{};
+        memcpy(&cmd, data, sizeof(cmd));
+        portENTER_CRITICAL(&s_rx_mux);
+        self->command_data = cmd;
+        self->last_command_receive_time_us = now;
+        self->have_command = true;
+        portEXIT_CRITICAL(&s_rx_mux);
         return;
     }
 
     if (data_len == static_cast<int>(sizeof(heartbeat_data_packet_t)))
     {
-        memcpy(&self->heartbeat_data, data, sizeof(self->heartbeat_data));
+        heartbeat_data_packet_t hb{};
+        memcpy(&hb, data, sizeof(hb));
+        portENTER_CRITICAL(&s_rx_mux);
+        self->heartbeat_data = hb;
         self->last_heartbeat_receive_time_us = now;
+        self->have_heartbeat = true;
+        portEXIT_CRITICAL(&s_rx_mux);
         return;
     }
 }
@@ -155,12 +200,12 @@ bool ESPNow::register_peer()
     peerInfo.channel = 0;
     peerInfo.encrypt = false;
 
-    const bool success = add_peer(&peerInfo);
+    const bool success = (add_peer(&peerInfo) == true);
 
-    return success;
+    return (success == true);
 }
 
-bool ESPNow::add_peer(const esp_now_peer_info_t* peerInfo)
+bool ESPNow::add_peer(const esp_now_peer_info_t *peerInfo)
 {
     if (esp_now_add_peer(peerInfo) != ESP_OK)
     {

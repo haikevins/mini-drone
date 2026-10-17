@@ -7,58 +7,55 @@
 
 namespace ADNS3080Reg
 {
-    static constexpr uint8_t PRODUCT_ID              = 0x00;
-    static constexpr uint8_t REVISION_ID             = 0x01;
-    static constexpr uint8_t MOTION                  = 0x02;
-    static constexpr uint8_t DELTA_X                 = 0x03;
-    static constexpr uint8_t DELTA_Y                 = 0x04;
-    static constexpr uint8_t SQUAL                   = 0x05;
-    static constexpr uint8_t PIXEL_SUM               = 0x06;
-    static constexpr uint8_t MAXIMUM_PIXEL           = 0x07;
-    static constexpr uint8_t CONFIGURATION_BITS      = 0x0A;
-    static constexpr uint8_t EXTENDED_CONFIG         = 0x0B;
-    static constexpr uint8_t DATA_OUT_LOWER          = 0x0C;
-    static constexpr uint8_t DATA_OUT_UPPER          = 0x0D;
-    static constexpr uint8_t SHUTTER_LOWER           = 0x0E;
-    static constexpr uint8_t SHUTTER_UPPER           = 0x0F;
-    static constexpr uint8_t MOTION_CLEAR            = 0x12;
-    static constexpr uint8_t FRAME_CAPTURE           = 0x13;
-    static constexpr uint8_t SROM_ENABLE             = 0x14;
-    static constexpr uint8_t FRAME_PERIOD_MAX_LOWER  = 0x19;
-    static constexpr uint8_t FRAME_PERIOD_MAX_UPPER  = 0x1A;
-    static constexpr uint8_t FRAME_PERIOD_MIN_LOWER  = 0x1B;
-    static constexpr uint8_t FRAME_PERIOD_MIN_UPPER  = 0x1C;
-    static constexpr uint8_t SHUTTER_MAX_LOWER       = 0x1D;
-    static constexpr uint8_t SHUTTER_MAX_UPPER       = 0x1E;
-    static constexpr uint8_t SROM_ID                 = 0x1F;
-    static constexpr uint8_t OBSERVATION             = 0x3D;
-    static constexpr uint8_t INVERSE_PRODUCT_ID      = 0x3F;
-    static constexpr uint8_t PIXEL_BURST             = 0x40;
-    static constexpr uint8_t MOTION_BURST            = 0x50;
-    static constexpr uint8_t SROM_LOAD               = 0x60;
+static constexpr uint8_t PRODUCT_ID = 0x00;
+static constexpr uint8_t REVISION_ID = 0x01;
+static constexpr uint8_t MOTION = 0x02;
+static constexpr uint8_t DELTA_X = 0x03;
+static constexpr uint8_t DELTA_Y = 0x04;
+static constexpr uint8_t SQUAL = 0x05;
+static constexpr uint8_t PIXEL_SUM = 0x06;
+static constexpr uint8_t MAXIMUM_PIXEL = 0x07;
+static constexpr uint8_t CONFIGURATION_BITS = 0x0A;
+static constexpr uint8_t EXTENDED_CONFIG = 0x0B;
+static constexpr uint8_t DATA_OUT_LOWER = 0x0C;
+static constexpr uint8_t DATA_OUT_UPPER = 0x0D;
+static constexpr uint8_t SHUTTER_LOWER = 0x0E;
+static constexpr uint8_t SHUTTER_UPPER = 0x0F;
+static constexpr uint8_t MOTION_CLEAR = 0x12;
+static constexpr uint8_t FRAME_CAPTURE = 0x13;
+static constexpr uint8_t SROM_ENABLE = 0x14;
+static constexpr uint8_t FRAME_PERIOD_MAX_LOWER = 0x19;
+static constexpr uint8_t FRAME_PERIOD_MAX_UPPER = 0x1A;
+static constexpr uint8_t FRAME_PERIOD_MIN_LOWER = 0x1B;
+static constexpr uint8_t FRAME_PERIOD_MIN_UPPER = 0x1C;
+static constexpr uint8_t SHUTTER_MAX_LOWER = 0x1D;
+static constexpr uint8_t SHUTTER_MAX_UPPER = 0x1E;
+static constexpr uint8_t SROM_ID = 0x1F;
+static constexpr uint8_t OBSERVATION = 0x3D;
+static constexpr uint8_t INVERSE_PRODUCT_ID = 0x3F;
+static constexpr uint8_t PIXEL_BURST = 0x40;
+static constexpr uint8_t MOTION_BURST = 0x50;
+static constexpr uint8_t SROM_LOAD = 0x60;
 
-    static constexpr uint8_t PRODUCT_ID_VALUE        = 0x17;
-    static constexpr uint8_t INVERSE_PRODUCT_VALUE   = 0xE8;
+static constexpr uint8_t PRODUCT_ID_VALUE = 0x17;
+static constexpr uint8_t INVERSE_PRODUCT_VALUE = 0xE8;
 
-    // Motion register bits
-    static constexpr uint8_t MOTION_BIT              = 0x80;
-    static constexpr uint8_t OVERFLOW_BIT            = 0x10;
+// Motion register bits
+static constexpr uint8_t MOTION_BIT = 0x80;
+static constexpr uint8_t OVERFLOW_BIT = 0x10;
 
-    // Configuration_Bits
-    static constexpr uint8_t CONFIG_1600_CPI         = 0x10;
-}
+// Configuration_Bits
+static constexpr uint8_t CONFIG_1600_CPI = 0x10;
+} // namespace ADNS3080Reg
 
 // Datasheet timing - kept exactly from the standalone ADNS-3080 project.
-static constexpr uint32_t T_SRAD_US       = 50u;
-static constexpr uint32_t T_SRAD_MOT_US   = 75u;
-static constexpr uint32_t T_SWW_US        = 50u;
-static constexpr uint32_t T_SWR_US        = 50u;
-static constexpr uint32_t T_BEXIT_US      = 5u;
+static constexpr uint32_t T_SRAD_US = 50u;
+static constexpr uint32_t T_SRAD_MOT_US = 75u;
+static constexpr uint32_t T_SWW_US = 50u;
+static constexpr uint32_t T_SWR_US = 50u;
+static constexpr uint32_t T_BEXIT_US = 5u;
 
-bool ADNS3080::begin(SPIBus * p_spi_bus_ref,
-                     uint8_t chip_select_pin_ref,
-                     uint8_t reset_pin_ref,
-                     int8_t npd_pin_ref)
+bool ADNS3080::begin(SPIBus *p_spi_bus_ref, uint8_t chip_select_pin_ref, uint8_t reset_pin_ref, int8_t npd_pin_ref)
 {
     if ((p_spi_bus_ref == nullptr) || (p_spi_bus_ref->is_initialized() == false))
     {
@@ -140,8 +137,7 @@ void ADNS3080::recover_serial_port()
 
 void ADNS3080::write_register(uint8_t reg, uint8_t value)
 {
-    if ((p_spi_bus == nullptr) ||
-        (p_spi_bus->begin_transaction(chip_select_pin, spi_settings) == false))
+    if ((p_spi_bus == nullptr) || (p_spi_bus->begin_transaction(chip_select_pin, spi_settings) == false))
     {
         return;
     }
@@ -156,14 +152,13 @@ void ADNS3080::write_register(uint8_t reg, uint8_t value)
 
 uint8_t ADNS3080::read_register(uint8_t reg, bool motion_delay)
 {
-    if ((p_spi_bus == nullptr) ||
-        (p_spi_bus->begin_transaction(chip_select_pin, spi_settings) == false))
+    if ((p_spi_bus == nullptr) || (p_spi_bus->begin_transaction(chip_select_pin, spi_settings) == false))
     {
         return 0u;
     }
 
     p_spi_bus->transfer(reg & 0x7Fu);
-    delayMicroseconds(motion_delay ? T_SRAD_MOT_US : T_SRAD_US);
+    delayMicroseconds((motion_delay == true) ? T_SRAD_MOT_US : T_SRAD_US);
     const uint8_t value = p_spi_bus->transfer(0x00u);
 
     p_spi_bus->end_transaction(chip_select_pin);
@@ -171,12 +166,11 @@ uint8_t ADNS3080::read_register(uint8_t reg, bool motion_delay)
     return value;
 }
 
-bool ADNS3080::read_motion_burst(data_t & adns_data)
+bool ADNS3080::read_motion_burst(data_t &adns_data)
 {
     uint8_t buffer[7];
 
-    if ((p_spi_bus == nullptr) ||
-        (p_spi_bus->begin_transaction(chip_select_pin, spi_settings) == false))
+    if ((p_spi_bus == nullptr) || (p_spi_bus->begin_transaction(chip_select_pin, spi_settings) == false))
     {
         return false;
     }
@@ -256,8 +250,7 @@ bool ADNS3080::check_link()
     Serial.print("  Inverse ID: 0x");
     Serial.println(ipid, HEX);
 
-    return (pid == ADNS3080Reg::PRODUCT_ID_VALUE) &&
-           (ipid == ADNS3080Reg::INVERSE_PRODUCT_VALUE);
+    return ((pid == ADNS3080Reg::PRODUCT_ID_VALUE) && (ipid == ADNS3080Reg::INVERSE_PRODUCT_VALUE));
 }
 
 void ADNS3080::set_1600_cpi()
@@ -283,12 +276,12 @@ void ADNS3080::enable_fixed_6469_fps_experimental()
     delay(1);
 }
 
-const ADNS3080::data_t & ADNS3080::get_data() const
+const ADNS3080::data_t &ADNS3080::get_data() const
 {
     return data;
 }
 
 bool ADNS3080::is_healthy() const
 {
-    return data.healthy;
+    return (data.healthy == true);
 }

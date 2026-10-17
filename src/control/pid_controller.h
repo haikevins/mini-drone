@@ -16,15 +16,11 @@ public:
     void setGains(float kp, float ki, float kd);
     void setLimits(float integLimit, float outputLimit);
     void setDFilterAlpha(float alpha);
-    void getGains(float& kp, float& ki, float& kd) const;
+    void getGains(float &kp, float &ki, float &kd) const;
 
     void reset();
 
-    float update(float target,
-                 float measurement,
-                 float dt,
-                 bool isYaw = false,
-                 bool derivativeOnMeasurement = true);
+    float update(float target, float measurement, float dt, bool isYaw = false, bool derivativeOnMeasurement = true);
 
 private:
     float Kp;
@@ -44,7 +40,7 @@ private:
 
     float dt_max = 0.1f;
 
-    void lpf_step(float& current, float target, float alpha);
+    void lpf_step(float &current, float target, float alpha);
     float wrap180_deg(float angle);
 };
 

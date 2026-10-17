@@ -37,7 +37,6 @@ float MPU6500::lpf_step(float current, float target, float alpha)
     return current + (alpha * (target - current));
 }
 
-
 float MPU6500::safe_divisor(float value)
 {
     if (fabsf(value) < 1e-6f)
@@ -54,7 +53,7 @@ float MPU6500::safe_accel_scale(float max_value, float min_value)
     return safe_divisor(scale);
 }
 
-void MPU6500::wait_for_stream_input(Stream * p_stream)
+void MPU6500::wait_for_stream_input(Stream *p_stream)
 {
     if (p_stream == nullptr)
     {
@@ -80,7 +79,7 @@ void MPU6500::wait_for_stream_input(Stream * p_stream)
     delay(300);
 }
 
-bool MPU6500::read_accel_average_g(uint16_t samples, float & avg_x, float & avg_y, float & avg_z)
+bool MPU6500::read_accel_average_g(uint16_t samples, float &avg_x, float &avg_y, float &avg_z)
 {
     if ((samples == 0u) || (p_spi_bus == nullptr))
     {
@@ -115,7 +114,7 @@ bool MPU6500::read_accel_average_g(uint16_t samples, float & avg_x, float & avg_
     return true;
 }
 
-bool MPU6500::begin(SPIBus * p_spi_bus_ref, uint8_t chip_select_pin_ref)
+bool MPU6500::begin(SPIBus *p_spi_bus_ref, uint8_t chip_select_pin_ref)
 {
     if (p_spi_bus_ref == nullptr)
     {
@@ -316,7 +315,7 @@ void MPU6500::set_body_rotation(float roll_rad, float pitch_rad, float yaw_rad)
     reset_filters();
 }
 
-void MPU6500::rotate_vector_to_body(float & x, float & y, float & z) const
+void MPU6500::rotate_vector_to_body(float &x, float &y, float &z) const
 {
     const float cr = cosf(imu_rotation_roll);
     const float sr = sinf(imu_rotation_roll);
@@ -463,22 +462,19 @@ void MPU6500::calibrate_accel_once(uint16_t samples)
     reset_filters();
 }
 
-bool MPU6500::calibrate_accel_6_side(uint16_t samples_per_side, Stream * p_stream, bool wait_for_user)
+bool MPU6500::calibrate_accel_6_side(uint16_t samples_per_side, Stream *p_stream, bool wait_for_user)
 {
     if ((samples_per_side == 0u) || (p_spi_bus == nullptr))
     {
         return false;
     }
 
-    const char * side_names[6] =
-    {
-        "+Z up / level",
-        "-Z up / upside down",
-        "+X up / right or left side",
-        "-X up / opposite side",
-        "+Y up / nose or tail up",
-        "-Y up / opposite nose or tail"
-    };
+    const char *side_names[6] = {"+Z up / level",
+                                 "-Z up / upside down",
+                                 "+X up / right or left side",
+                                 "-X up / opposite side",
+                                 "+Y up / nose or tail up",
+                                 "-Y up / opposite nose or tail"};
 
     float min_x = FLT_MAX;
     float min_y = FLT_MAX;
@@ -504,7 +500,7 @@ bool MPU6500::calibrate_accel_6_side(uint16_t samples_per_side, Stream * p_strea
             p_stream->println(F("Keep it still. Send any key/newline to sample."));
         }
 
-        if (wait_for_user)
+        if (wait_for_user == true)
         {
             wait_for_stream_input(p_stream);
         }
@@ -527,13 +523,35 @@ bool MPU6500::calibrate_accel_6_side(uint16_t samples_per_side, Stream * p_strea
             return false;
         }
 
-        if (avg_x < min_x) { min_x = avg_x; }
-        if (avg_y < min_y) { min_y = avg_y; }
-        if (avg_z < min_z) { min_z = avg_z; }
+        if (avg_x < min_x)
+        {
+            min_x = avg_x;
+        }
 
-        if (avg_x > max_x) { max_x = avg_x; }
-        if (avg_y > max_y) { max_y = avg_y; }
-        if (avg_z > max_z) { max_z = avg_z; }
+        if (avg_y < min_y)
+        {
+            min_y = avg_y;
+        }
+
+        if (avg_z < min_z)
+        {
+            min_z = avg_z;
+        }
+
+        if (avg_x > max_x)
+        {
+            max_x = avg_x;
+        }
+
+        if (avg_y > max_y)
+        {
+            max_y = avg_y;
+        }
+
+        if (avg_z > max_z)
+        {
+            max_z = avg_z;
+        }
 
         if (p_stream != nullptr)
         {
@@ -593,8 +611,8 @@ bool MPU6500::calibrate_accel_6_side(uint16_t samples_per_side, Stream * p_strea
     return true;
 }
 
-void MPU6500::set_accel_calibration(float bias_x, float bias_y, float bias_z,
-                                    float scale_x, float scale_y, float scale_z)
+void MPU6500::set_accel_calibration(
+    float bias_x, float bias_y, float bias_z, float scale_x, float scale_y, float scale_z)
 {
     accel_bias_x = bias_x;
     accel_bias_y = bias_y;
@@ -622,7 +640,7 @@ MPU6500::accel_calibration_t MPU6500::get_accel_calibration() const
     return calibration;
 }
 
-void MPU6500::print_accel_calibration(Stream & stream) const
+void MPU6500::print_accel_calibration(Stream &stream) const
 {
     stream.print(F("accel_bias_x="));
     stream.println(accel_bias_x, 8);
@@ -654,27 +672,27 @@ void MPU6500::reset_filters()
     filters_initialized = false;
 }
 
-const MPU6500::raw_data_t & MPU6500::get_raw() const
+const MPU6500::raw_data_t &MPU6500::get_raw() const
 {
     return raw;
 }
 
-const MPU6500::scaled_data_t & MPU6500::get_scaled() const
+const MPU6500::scaled_data_t &MPU6500::get_scaled() const
 {
     return scaled;
 }
 
-const MPU6500::scaled_data_t & MPU6500::get_filtered() const
+const MPU6500::scaled_data_t &MPU6500::get_filtered() const
 {
     return filtered;
 }
 
-const MPU6500::scaled_data_t & MPU6500::get_data() const
+const MPU6500::scaled_data_t &MPU6500::get_data() const
 {
     return filtered;
 }
 
-const MPU6500::timing_t & MPU6500::get_timing() const
+const MPU6500::timing_t &MPU6500::get_timing() const
 {
     return timing;
 }

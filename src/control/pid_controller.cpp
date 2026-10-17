@@ -1,11 +1,6 @@
 #include "control/pid_controller.h"
 
-PIDController::PIDController(float kp,
-                             float ki,
-                             float kd,
-                             float integLimit,
-                             float outputLimit,
-                             float dFilterAlpha)
+PIDController::PIDController(float kp, float ki, float kd, float integLimit, float outputLimit, float dFilterAlpha)
 {
     Kp = kp;
     Ki = ki;
@@ -36,14 +31,14 @@ void PIDController::setDFilterAlpha(float alpha)
     dFilterAlpha = constrain(alpha, 0.0f, 1.0f);
 }
 
-void PIDController::getGains(float& kp, float& ki, float& kd) const
+void PIDController::getGains(float &kp, float &ki, float &kd) const
 {
     kp = Kp;
     ki = Ki;
     kd = Kd;
 }
 
-void PIDController::lpf_step(float& current, float target, float alpha)
+void PIDController::lpf_step(float &current, float target, float alpha)
 {
     current = current + (alpha * (target - current));
 }
@@ -57,13 +52,9 @@ void PIDController::reset()
     firstRun = true;
 }
 
-float PIDController::update(float target,
-                            float measurement,
-                            float dt,
-                            bool is_yaw,
-                            bool derivativeOnMeasurement)
+float PIDController::update(float target, float measurement, float dt, bool is_yaw, bool derivativeOnMeasurement)
 {
-    if (dt <= 0.0f || dt > dt_max) 
+    if ((dt <= 0.0f) || (dt > dt_max))
     {
         reset();
         return 0.0f;
@@ -71,34 +62,34 @@ float PIDController::update(float target,
 
     float error = target - measurement;
 
-    if (is_yaw) 
+    if (is_yaw == true)
     {
         error = wrap180_deg(error);
     }
 
     float derivative = 0.0f;
 
-    if (firstRun) 
+    if (firstRun == true)
     {
         prevError = error;
         prevMeasurement = measurement;
         dFiltered = 0.0f;
         firstRun = false;
-    } 
-    else 
+    }
+    else
     {
-        if (derivativeOnMeasurement) 
+        if (derivativeOnMeasurement == true)
         {
             float measurementDelta = measurement - prevMeasurement;
 
-            if (is_yaw)
+            if (is_yaw == true)
             {
                 measurementDelta = wrap180_deg(measurementDelta);
             }
-            
+
             derivative = -measurementDelta / dt;
-        } 
-        else 
+        }
+        else
         {
             derivative = (error - prevError) / dt;
         }
@@ -115,7 +106,7 @@ float PIDController::update(float target,
 
     float output = Kp * error + Ki * integrator + Kd * dFiltered;
 
-    if (outputLimit > 0.0f) 
+    if (outputLimit > 0.0f)
     {
         output = constrain(output, -outputLimit, outputLimit);
     }
@@ -128,12 +119,12 @@ float PIDController::update(float target,
 
 float PIDController::wrap180_deg(float angle)
 {
-    while (angle > 180.0f) 
+    while (angle > 180.0f)
     {
         angle -= 360.0f;
     }
 
-    while (angle < -180.0f) 
+    while (angle < -180.0f)
     {
         angle += 360.0f;
     }

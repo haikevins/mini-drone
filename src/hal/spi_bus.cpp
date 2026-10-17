@@ -5,8 +5,9 @@
 
 #include "hal/spi_bus.h"
 
-SPIBus::SPIBus(SPIClass & spi_class) : p_spi(&spi_class)
-{}
+SPIBus::SPIBus(SPIClass &spi_class) : p_spi(&spi_class)
+{
+}
 
 bool SPIBus::begin(int sck_pin, int miso_pin, int mosi_pin)
 {
@@ -32,7 +33,7 @@ bool SPIBus::begin(int sck_pin, int miso_pin, int mosi_pin)
     return true;
 }
 
-bool SPIBus::begin_transaction(uint8_t chip_select_pin, const SPISettings & settings)
+bool SPIBus::begin_transaction(uint8_t chip_select_pin, const SPISettings &settings)
 {
     if ((initialized == false) || (p_spi == nullptr) || (bus_mutex == nullptr))
     {
@@ -78,10 +79,7 @@ void SPIBus::end_transaction(uint8_t chip_select_pin)
     }
 }
 
-bool SPIBus::write_register(uint8_t chip_select_pin,
-                            uint8_t reg_addr,
-                            uint8_t reg_value,
-                            const SPISettings & settings)
+bool SPIBus::write_register(uint8_t chip_select_pin, uint8_t reg_addr, uint8_t reg_value, const SPISettings &settings)
 {
     if (begin_transaction(chip_select_pin, settings) == false)
     {
@@ -95,9 +93,7 @@ bool SPIBus::write_register(uint8_t chip_select_pin,
     return true;
 }
 
-uint8_t SPIBus::read_register(uint8_t chip_select_pin,
-                              uint8_t reg_addr,
-                              const SPISettings & settings)
+uint8_t SPIBus::read_register(uint8_t chip_select_pin, uint8_t reg_addr, const SPISettings &settings)
 {
     if (begin_transaction(chip_select_pin, settings) == false)
     {
@@ -111,11 +107,8 @@ uint8_t SPIBus::read_register(uint8_t chip_select_pin,
     return reg_value;
 }
 
-bool SPIBus::read_registers(uint8_t chip_select_pin,
-                            uint8_t start_reg_addr,
-                            uint8_t * p_buffer,
-                            size_t length,
-                            const SPISettings & settings)
+bool SPIBus::read_registers(
+    uint8_t chip_select_pin, uint8_t start_reg_addr, uint8_t *p_buffer, size_t length, const SPISettings &settings)
 {
     if ((p_buffer == nullptr) || (length == 0u))
     {
@@ -140,5 +133,5 @@ bool SPIBus::read_registers(uint8_t chip_select_pin,
 
 bool SPIBus::is_initialized() const
 {
-    return initialized;
+    return (initialized == true);
 }

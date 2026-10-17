@@ -8,48 +8,63 @@
 
 #include "communication/espnow_protocol.h"
 
+struct ESPNowRxSnapshot
+{
+    command_data_packet_t command;
+    uint32_t last_command_us;
+    uint32_t last_heartbeat_us;
+    bool have_command;
+    bool have_heartbeat;
+};
+
 class ESPNow
 {
-    public:
-        ESPNow();
-        
-        bool begin();
-        bool send(const uint8_t* data, size_t len);
-        bool send_attitude(const attitude_data_packet_t & attitude_data);
+public:
+    ESPNow();
 
-        bool is_armed() const;
-        bool is_reset() const;
-        bool is_throttle_up() const;
-        bool is_throttle_down() const;
-        bool is_direction_forward() const;
-        bool is_direction_backward() const;
-        bool is_direction_left() const;
-        bool is_direction_right() const;
-        void reset_command();
-        const command_data_packet_t & get_command_data() const;
+    bool begin();
+    bool send(const uint8_t *data, size_t len);
+    bool send_attitude(const attitude_data_packet_t &attitude_data);
+    bool send_status(const flight_status_packet_t &status_data);
+    ESPNowRxSnapshot get_rx_snapshot() const;
+    static bool is_fresh(uint32_t now_us, uint32_t last_us, bool seen, uint32_t timeout_us);
 
-        bool is_heartbeat_recent(uint32_t timeout_ms) const;    
+    bool is_armed() const;
+    bool is_reset() const;
+    bool is_throttle_up() const;
+    bool is_throttle_down() const;
+    bool is_direction_forward() const;
+    bool is_direction_backward() const;
+    bool is_direction_left() const;
+    bool is_direction_right() const;
+    void reset_command();
+    command_data_packet_t get_command_data() const;
 
-        void register_recv_callback(esp_now_recv_cb_t callback);
-        void register_send_callback(esp_now_send_cb_t callback);
+    bool is_heartbeat_recent(uint32_t timeout_us) const;
 
-        static void on_data_sent(const wifi_tx_info_t *info, esp_now_send_status_t status);
-        static void on_data_recv(const esp_now_recv_info_t *info, const uint8_t *data, int data_len);
+    void register_recv_callback(esp_now_recv_cb_t callback);
+    void register_send_callback(esp_now_send_cb_t callback);
 
-        bool register_peer();
+    static void on_data_sent(const wifi_tx_info_t *info, esp_now_send_status_t status);
+    static void on_data_recv(const esp_now_recv_info_t *info, const uint8_t *data, int data_len);
 
-    private:
-        // replace with controller's mac address
-        uint8_t controller_address[6] = {0xAC, 0xA7, 0x04, 0xBB, 0x6D, 0x64};
+    bool register_peer();
 
-        command_data_packet_t command_data;
-        heartbeat_data_packet_t heartbeat_data;
+private:
+    // replace with controller's mac address
+    uint8_t controller_address[6] = {0xAC, 0xA7, 0x04, 0xBB, 0x6D, 0x64};
 
-        uint32_t last_heartbeat_receive_time_us;
+    command_data_packet_t command_data;
+    heartbeat_data_packet_t heartbeat_data;
 
-        static ESPNow * active_instance;
+    uint32_t last_heartbeat_receive_time_us;
+    uint32_t last_command_receive_time_us;
+    bool have_heartbeat;
+    bool have_command;
 
-        bool add_peer(const esp_now_peer_info_t* peerInfo);
+    static ESPNow *active_instance;
+
+    bool add_peer(const esp_now_peer_info_t *peerInfo);
 };
 
 #endif /* ESPNOW_H */

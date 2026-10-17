@@ -5,12 +5,11 @@
 
 #include "hal/i2c_bus.h"
 
-I2CBus::I2CBus(TwoWire & wire) : p_wire(&wire)
-{}
+I2CBus::I2CBus(TwoWire &wire) : p_wire(&wire)
+{
+}
 
-bool I2CBus::begin(int sda_pin,
-                   int scl_pin,
-                   uint32_t frequency_hz)
+bool I2CBus::begin(int sda_pin, int scl_pin, uint32_t frequency_hz)
 {
     if (p_wire == nullptr)
     {
@@ -41,14 +40,12 @@ bool I2CBus::begin(int sda_pin,
 
 bool I2CBus::lock_bus()
 {
-    if ((initialized == false) ||
-        (p_wire == nullptr) ||
-        (bus_mutex == nullptr))
+    if ((initialized == false) || (p_wire == nullptr) || (bus_mutex == nullptr))
     {
         return false;
     }
 
-    return xSemaphoreTake(bus_mutex, portMAX_DELAY) == pdTRUE;
+    return (xSemaphoreTake(bus_mutex, portMAX_DELAY) == pdTRUE);
 }
 
 void I2CBus::unlock_bus()
@@ -59,10 +56,7 @@ void I2CBus::unlock_bus()
     }
 }
 
-bool I2CBus::write_bytes_locked(uint8_t device_address,
-                                uint16_t register_address,
-                                const uint8_t * p_data,
-                                size_t length)
+bool I2CBus::write_bytes_locked(uint8_t device_address, uint16_t register_address, const uint8_t *p_data, size_t length)
 {
     if ((p_data == nullptr) || (length == 0u))
     {
@@ -93,10 +87,7 @@ bool I2CBus::write_bytes_locked(uint8_t device_address,
     return false;
 }
 
-bool I2CBus::read_bytes_locked(uint8_t device_address,
-                               uint16_t register_address,
-                               uint8_t * p_buffer,
-                               size_t length)
+bool I2CBus::read_bytes_locked(uint8_t device_address, uint16_t register_address, uint8_t *p_buffer, size_t length)
 {
     if ((p_buffer == nullptr) || (length == 0u))
     {
@@ -117,11 +108,7 @@ bool I2CBus::read_bytes_locked(uint8_t device_address,
             continue;
         }
 
-        const size_t received = p_wire->requestFrom(
-            device_address,
-            length,
-            true
-        );
+        const size_t received = p_wire->requestFrom(device_address, length, true);
 
         if (received != length)
         {
@@ -157,103 +144,66 @@ bool I2CBus::read_bytes_locked(uint8_t device_address,
     return false;
 }
 
-bool I2CBus::write_u8(uint8_t device_address,
-                      uint16_t register_address,
-                      uint8_t value)
+bool I2CBus::write_u8(uint8_t device_address, uint16_t register_address, uint8_t value)
 {
     if (lock_bus() == false)
     {
         return false;
     }
 
-    const bool ok = write_bytes_locked(
-        device_address,
-        register_address,
-        &value,
-        1u
-    );
+    const bool ok = (write_bytes_locked(device_address, register_address, &value, 1u) == true);
 
     unlock_bus();
-    return ok;
+    return (ok == true);
 }
 
-bool I2CBus::write_u16(uint8_t device_address,
-                       uint16_t register_address,
-                       uint16_t value)
+bool I2CBus::write_u16(uint8_t device_address, uint16_t register_address, uint16_t value)
 {
-    const uint8_t data[2] =
-    {
-        static_cast<uint8_t>(value >> 8),
-        static_cast<uint8_t>(value & 0xFFu)
-    };
+    const uint8_t data[2] = {static_cast<uint8_t>(value >> 8), static_cast<uint8_t>(value & 0xFFu)};
 
     if (lock_bus() == false)
     {
         return false;
     }
 
-    const bool ok = write_bytes_locked(
-        device_address,
-        register_address,
-        data,
-        sizeof(data)
-    );
+    const bool ok = (write_bytes_locked(device_address, register_address, data, sizeof(data)) == true);
 
     unlock_bus();
-    return ok;
+    return (ok == true);
 }
 
-bool I2CBus::write_u32(uint8_t device_address,
-                       uint16_t register_address,
-                       uint32_t value)
+bool I2CBus::write_u32(uint8_t device_address, uint16_t register_address, uint32_t value)
 {
-    const uint8_t data[4] =
-    {
-        static_cast<uint8_t>(value >> 24),
-        static_cast<uint8_t>(value >> 16),
-        static_cast<uint8_t>(value >> 8),
-        static_cast<uint8_t>(value & 0xFFu)
-    };
+    const uint8_t data[4] = {static_cast<uint8_t>(value >> 24),
+                             static_cast<uint8_t>(value >> 16),
+                             static_cast<uint8_t>(value >> 8),
+                             static_cast<uint8_t>(value & 0xFFu)};
 
     if (lock_bus() == false)
     {
         return false;
     }
 
-    const bool ok = write_bytes_locked(
-        device_address,
-        register_address,
-        data,
-        sizeof(data)
-    );
+    const bool ok = (write_bytes_locked(device_address, register_address, data, sizeof(data)) == true);
 
     unlock_bus();
-    return ok;
+    return (ok == true);
 }
 
-bool I2CBus::read_u8(uint8_t device_address,
-                     uint16_t register_address,
-                     uint8_t & value)
+bool I2CBus::read_u8(uint8_t device_address, uint16_t register_address, uint8_t &value)
 {
     if (lock_bus() == false)
     {
         return false;
     }
 
-    const bool ok = read_bytes_locked(
-        device_address,
-        register_address,
-        &value,
-        1u
-    );
+    const bool ok = (read_bytes_locked(device_address, register_address, &value, 1u) == true);
 
     unlock_bus();
-    return ok;
+    return (ok == true);
 }
 
-bool I2CBus::read_u16(uint8_t device_address,
-                      uint16_t register_address,
-                      uint16_t & value)
+bool I2CBus::read_u16(uint8_t device_address, uint16_t register_address, uint16_t &value)
 {
     uint8_t data[2] = {0u, 0u};
 
@@ -262,12 +212,7 @@ bool I2CBus::read_u16(uint8_t device_address,
         return false;
     }
 
-    const bool ok = read_bytes_locked(
-        device_address,
-        register_address,
-        data,
-        sizeof(data)
-    );
+    const bool ok = (read_bytes_locked(device_address, register_address, data, sizeof(data)) == true);
 
     unlock_bus();
 
@@ -276,15 +221,12 @@ bool I2CBus::read_u16(uint8_t device_address,
         return false;
     }
 
-    value = (static_cast<uint16_t>(data[0]) << 8) |
-            static_cast<uint16_t>(data[1]);
+    value = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
 
     return true;
 }
 
-bool I2CBus::read_u32(uint8_t device_address,
-                      uint16_t register_address,
-                      uint32_t & value)
+bool I2CBus::read_u32(uint8_t device_address, uint16_t register_address, uint32_t &value)
 {
     uint8_t data[4] = {0u, 0u, 0u, 0u};
 
@@ -293,12 +235,7 @@ bool I2CBus::read_u32(uint8_t device_address,
         return false;
     }
 
-    const bool ok = read_bytes_locked(
-        device_address,
-        register_address,
-        data,
-        sizeof(data)
-    );
+    const bool ok = (read_bytes_locked(device_address, register_address, data, sizeof(data)) == true);
 
     unlock_bus();
 
@@ -307,36 +244,26 @@ bool I2CBus::read_u32(uint8_t device_address,
         return false;
     }
 
-    value = (static_cast<uint32_t>(data[0]) << 24) |
-            (static_cast<uint32_t>(data[1]) << 16) |
-            (static_cast<uint32_t>(data[2]) << 8) |
-            static_cast<uint32_t>(data[3]);
+    value = (static_cast<uint32_t>(data[0]) << 24) | (static_cast<uint32_t>(data[1]) << 16) |
+            (static_cast<uint32_t>(data[2]) << 8) | static_cast<uint32_t>(data[3]);
 
     return true;
 }
 
-bool I2CBus::read_bytes(uint8_t device_address,
-                        uint16_t register_address,
-                        uint8_t * p_buffer,
-                        size_t length)
+bool I2CBus::read_bytes(uint8_t device_address, uint16_t register_address, uint8_t *p_buffer, size_t length)
 {
     if (lock_bus() == false)
     {
         return false;
     }
 
-    const bool ok = read_bytes_locked(
-        device_address,
-        register_address,
-        p_buffer,
-        length
-    );
+    const bool ok = (read_bytes_locked(device_address, register_address, p_buffer, length) == true);
 
     unlock_bus();
-    return ok;
+    return (ok == true);
 }
 
 bool I2CBus::is_initialized() const
 {
-    return initialized;
+    return (initialized == true);
 }
