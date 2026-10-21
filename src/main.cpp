@@ -4,6 +4,16 @@
 
 #include <Arduino.h>
 #include <math.h>
+#include "flight_scheduler.h"
+
+#include "esp_task_wdt.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+// Exported by Arduino-ESP32 3.3.11 main.cpp. Keep loopTask WDT service.
+extern bool loopTaskWDTEnabled;
+#if (CONFIG_FREERTOS_UNICORE != 1) || (CONFIG_FREERTOS_HZ != 1000)
+#error "Phase 4 continuous loop requires unicore FreeRTOS with a 1000 Hz tick"
+#endif
 
 #include "drivers/mpu6500.h"
 #include "drivers/adns_3080.h"
@@ -168,7 +178,7 @@ static bool g_flight_armed = false; // Actual ARM state, not requested ARM bit.
  * attitude PID corrections are mixed into individual motors.
  */
 static constexpr float g_motor_throttle_base_min = 1000.0f;
-static constexpr float g_motor_throttle_base_max = 1400.0f;
+static constexpr float g_motor_throttle_base_max = 1850.0f;
 
 /**
  * @brief Motor throttle operating limits.
@@ -182,13 +192,13 @@ static constexpr float g_motor_throttle_max = 2000.0f;
  *
  * Different rates are used when increasing and decreasing throttle.
  */
-static constexpr float g_throttle_up_step_per_second = 200.0f;
-static constexpr float g_throttle_down_step_per_second = 60.0f;
+static constexpr float g_throttle_up_step_per_second = 450.0f;
+static constexpr float g_throttle_down_step_per_second = 100.0f;
 
 /**
  * @brief Failsafe throttle ramp-down configuration.
  */
-static constexpr float g_failsafe_throttle_step_per_second = 60.0f;
+static constexpr float g_failsafe_throttle_step_per_second = 100.0f;
 
 static bool g_failsafe_active = false;
 
@@ -214,7 +224,6 @@ static bool g_imu_fault_latched = false;
 static void setup_spi_bus();
 static void setup_i2c_bus();
 static void setup_imu();
-static void setup_adns();
 static void setup_vl53l1x();
 static void setup_pid();
 static void setup_espnow();
@@ -229,13 +238,10 @@ static void send_flight_status(
 
 void setup()
 {
-    Serial.begin(115200);
-    delay(2000);
-
     setup_spi_bus();
     setup_i2c_bus();
     setup_imu();
-    setup_adns();
+    // ADNS3080 is intentionally not initialized in this firmware variant.
     setup_vl53l1x();
     setup_pid();
     setup_espnow();
@@ -244,7 +250,7 @@ void setup()
     g_imu_last_valid_us = micros();
 }
 
-void loop()
+static void flight_control_pass()
 {
     const uint32_t now = micros();
 
@@ -302,11 +308,6 @@ void loop()
     if (((imu_updated == true) && (imu_sample_valid == false)) ||
         (uint32_t(micros() - g_imu_last_valid_us) > g_imu_data_timeout_us))
     {
-        if (g_imu_fault_latched == false)
-        {
-            Serial.println("[FLIGHT IMU FAILSAFE] Invalid/stale MPU6500 data; MOTOR OFF=1000");
-        }
-
         g_imu_fault_latched = true;
     }
 
@@ -316,7 +317,6 @@ void loop()
         (rx.command.arm == false))
     {
         g_imu_fault_latched = false;
-        Serial.println("[FLIGHT IMU RECOVERED] Fresh DISARM accepted; ARM again manually");
     }
 
     g_flight_armed = ((link.armed == true) && (imu_recent == true) && (g_imu_fault_latched == false));
@@ -324,20 +324,6 @@ void loop()
     if (link.entered_failsafe == true)
     {
         reset_attitude_target();
-        Serial.printf("[FLIGHT FAILSAFE] reason=%u cmd_fresh=%u hb_fresh=%u\n",
-                      unsigned(link.reason),
-                      unsigned(cmd_recent),
-                      unsigned(hb_recent));
-    }
-
-    if ((link.just_armed == true) && (imu_recent == true) && (g_imu_fault_latched == false))
-    {
-        Serial.println("[FLIGHT ARM ACK] actual_arm=1");
-    }
-
-    if (link.just_disarmed == true)
-    {
-        Serial.println("[FLIGHT ARM ACK] actual_arm=0");
     }
 
     // DISARM must cut outputs even when the IMU has no new sample.
@@ -393,7 +379,6 @@ void loop()
         g_madgwick = Madgwick();
         g_madgwick.begin(g_imu_read_default_hz);
         g_madgwick.setBeta(g_madgwick_beta_current);
-        Serial.println("[FLIGHT IMU FAILSAFE] Invalid Madgwick attitude; MOTOR OFF=1000");
         send_flight_status(rx, rx_check_now, cmd_recent, hb_recent, FlightLinkReason::IMU_TIMEOUT);
         return;
     }
@@ -418,10 +403,10 @@ void loop()
             float pitch_output = g_pid_pitch_rate.update(pitch_rate_sp, imu_data.gy, imu_dt, false, true);
             float yaw_output = g_pid_yaw_rate.update(g_target_yaw_rate, imu_data.gz, imu_dt, false, true);
 
-            float motor1_speed = g_motor_throttle_base + roll_output - pitch_output + yaw_output;         // front left
-            float motor2_speed = g_motor_throttle_base - roll_output - pitch_output - yaw_output + 60.0f; // front right
-            float motor3_speed = g_motor_throttle_base - roll_output + pitch_output + yaw_output + 120.0f; // rear right
-            float motor4_speed = g_motor_throttle_base + roll_output + pitch_output - yaw_output + 10.0f;  // rear left
+            float motor1_speed = g_motor_throttle_base + roll_output - pitch_output + yaw_output; // front left
+            float motor2_speed = g_motor_throttle_base - roll_output - pitch_output - yaw_output; // front right
+            float motor3_speed = g_motor_throttle_base - roll_output + pitch_output + yaw_output; // rear right
+            float motor4_speed = g_motor_throttle_base + roll_output + pitch_output - yaw_output + 100.0f; // rear left
 
             float max_motor_speed = max(max(motor1_speed, motor2_speed), max(motor3_speed, motor4_speed));
             if (max_motor_speed > g_motor_throttle_max)
@@ -442,7 +427,6 @@ void loop()
                 motor3_speed += diff;
                 motor4_speed += diff;
             }
-
             g_motors.write_motors(motor1_speed, motor2_speed, motor3_speed, motor4_speed);
         }
         else
@@ -487,10 +471,10 @@ void loop()
             float pitch_output = g_pid_pitch_rate.update(pitch_rate_sp, imu_data.gy, imu_dt, false, true);
             float yaw_output = g_pid_yaw_rate.update(g_target_yaw_rate, imu_data.gz, imu_dt, false, true);
 
-            float motor1_speed = g_motor_throttle_base + roll_output - pitch_output + yaw_output;         // front left
-            float motor2_speed = g_motor_throttle_base - roll_output - pitch_output - yaw_output + 60.0f; // front right
-            float motor3_speed = g_motor_throttle_base - roll_output + pitch_output + yaw_output + 120.0f; // rear right
-            float motor4_speed = g_motor_throttle_base + roll_output + pitch_output - yaw_output + 10.0f;  // rear left
+            float motor1_speed = g_motor_throttle_base + roll_output - pitch_output + yaw_output; // front left
+            float motor2_speed = g_motor_throttle_base - roll_output - pitch_output - yaw_output; // front right
+            float motor3_speed = g_motor_throttle_base - roll_output + pitch_output + yaw_output; // rear right
+            float motor4_speed = g_motor_throttle_base + roll_output + pitch_output - yaw_output + 100.0f; // rear left
 
             float max_motor_speed = max(max(motor1_speed, motor2_speed), max(motor3_speed, motor4_speed));
             if (max_motor_speed > g_motor_throttle_max)
@@ -511,7 +495,6 @@ void loop()
                 motor3_speed += diff;
                 motor4_speed += diff;
             }
-
             g_motors.write_motors(motor1_speed, motor2_speed, motor3_speed, motor4_speed);
         }
         else
@@ -538,6 +521,26 @@ void loop()
     }
 
     send_flight_status(rx, rx_check_now, cmd_recent, hb_recent, status_reason);
+}
+
+void loop()
+{
+    // Keep the control pass in Arduino's original loopTask (priority 1).
+    // The regular 1-tick release avoids Arduino's 5-tick delay every ~2 s.
+    uint32_t last_release_us = micros();
+    for (;;)
+    {
+        if (loopTaskWDTEnabled)
+        {
+            esp_task_wdt_reset();
+        }
+        flight_control_pass();
+        const uint32_t release_now_us = micros();
+        if (flight_scheduler::release_due(release_now_us, last_release_us))
+        {
+            vTaskDelay(flight_scheduler::kReleaseTicks);
+        }
+    }
 }
 
 static void send_flight_status(
@@ -665,7 +668,6 @@ void setup_spi_bus()
 
     if (b_spi_ready == false)
     {
-        Serial.println("SPI BUS INIT FAILED");
         for (;;)
         {
         }
@@ -678,7 +680,6 @@ void setup_i2c_bus()
 
     if (b_i2c_ready == false)
     {
-        Serial.println("I2C BUS INIT FAILED");
         for (;;)
         {
         }
@@ -690,14 +691,9 @@ void setup_imu()
     const bool b_imu_ready = (g_imu.begin(&g_spi_bus, g_imu_pin_ncs) == true);
     if (b_imu_ready == false)
     {
-        Serial.println("MPU6500 NOT DETECTED");
         for (;;)
         {
         }
-    }
-    else
-    {
-        Serial.println("MPU6500 DETECTED");
     }
 
     g_imu.set_body_rotation(0.0f, 0.0f, 0.0f);
@@ -708,22 +704,6 @@ void setup_imu()
 
     g_imu.calibrate_gyro();
 
-    /*
-        Serial.println("\nStart accel 6-side calibration");
-
-        bool g_imu_calibrate_accel_ready = g_imu.calibrate_accel_6_side(1000, &Serial, true);
-
-        if (g_imu_calibrate_accel_ready == true)
-        {
-            Serial.println("Accel calibration OK");
-            g_imu.print_accel_calibration(Serial);
-        }
-        else
-        {
-            Serial.println("Accel calibration FAILED");
-        }
-
-    */
     g_imu.calibrate_accel_once();
 
     g_imu.set_gyro_lpf(g_imu_gyro_lpf_alpha);
@@ -733,23 +713,6 @@ void setup_imu()
     g_madgwick.setBeta(g_madgwick_beta_current);
 }
 
-void setup_adns()
-{
-    const bool b_adns_ready = (g_adns.begin(&g_spi_bus, g_adns_pin_ncs, g_adns_pin_rst, g_adns_pin_npd) == true);
-
-    if (b_adns_ready == false)
-    {
-        Serial.println("ADNS3080 NOT DETECTED");
-        for (;;)
-        {
-        }
-    }
-    else
-    {
-        Serial.println("ADNS3080 DETECTED");
-    }
-}
-
 void setup_vl53l1x()
 {
     const bool b_vl53l1x_ready =
@@ -757,15 +720,9 @@ void setup_vl53l1x()
 
     if (b_vl53l1x_ready == false)
     {
-        Serial.print("VL53L1X INIT FAILED: ");
-        Serial.println(g_vl53l1x.get_init_error_string());
         for (;;)
         {
         }
-    }
-    else
-    {
-        Serial.println("VL53L1X DETECTED");
     }
 }
 
@@ -784,26 +741,16 @@ void setup_espnow()
     const bool b_espnow_ready = (g_espnow.begin() == true);
     if (b_espnow_ready == false)
     {
-        Serial.println("ESP-NOW INIT FAILED");
         for (;;)
         {
         }
-    }
-    else
-    {
-        Serial.println("ESP-NOW INIT SUCCESS");
     }
 
     const bool b_peer_registered = (g_espnow.register_peer() == true);
     if (b_peer_registered == false)
     {
-        Serial.println("ESP-NOW PEER REGISTRATION FAILED");
         for (;;)
         {
         }
-    }
-    else
-    {
-        Serial.println("ESP-NOW PEER REGISTRATION SUCCESS");
     }
 }

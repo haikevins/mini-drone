@@ -87,7 +87,7 @@ public:
          * Returns false if sampling fails or if a side span is invalid.
          */
     bool
-    calibrate_accel_6_side(uint16_t samples_per_side = 1000u, Stream *p_stream = &Serial, bool wait_for_user = true);
+    calibrate_accel_6_side(uint16_t samples_per_side = 1000u, Stream *p_stream = nullptr, bool wait_for_user = true);
 
     void set_accel_calibration(float bias_x, float bias_y, float bias_z, float scale_x, float scale_y, float scale_z);
 

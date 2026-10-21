@@ -100,15 +100,6 @@ bool ADNS3080::begin(SPIBus *p_spi_bus_ref, uint8_t chip_select_pin_ref, uint8_t
     set_1600_cpi();
     clear_motion();
 
-    const uint8_t rev = read_register(ADNS3080Reg::REVISION_ID);
-    const uint8_t srom = read_register(ADNS3080Reg::SROM_ID);
-
-    Serial.print("Revision ID: 0x");
-    Serial.println(rev, HEX);
-
-    Serial.print("SROM ID: 0x");
-    Serial.println(srom, HEX);
-
     data.healthy = true;
     return true;
 }
@@ -245,11 +236,6 @@ bool ADNS3080::check_link()
     const uint8_t pid = read_register(ADNS3080Reg::PRODUCT_ID);
     const uint8_t ipid = read_register(ADNS3080Reg::INVERSE_PRODUCT_ID);
 
-    Serial.print("Product ID: 0x");
-    Serial.print(pid, HEX);
-    Serial.print("  Inverse ID: 0x");
-    Serial.println(ipid, HEX);
-
     return ((pid == ADNS3080Reg::PRODUCT_ID_VALUE) && (ipid == ADNS3080Reg::INVERSE_PRODUCT_VALUE));
 }
 
@@ -259,9 +245,6 @@ void ADNS3080::set_1600_cpi()
     config |= ADNS3080Reg::CONFIG_1600_CPI;
     write_register(ADNS3080Reg::CONFIGURATION_BITS, config);
 
-    const uint8_t motion = read_register(ADNS3080Reg::MOTION, true);
-    Serial.print("Motion reg after 1600 CPI set: 0x");
-    Serial.println(motion, HEX);
 }
 
 void ADNS3080::enable_fixed_6469_fps_experimental()

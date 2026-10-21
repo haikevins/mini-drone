@@ -251,7 +251,8 @@ bool MPU6500::read_sensor()
 
     uint8_t buffer[14];
 
-    if (p_spi_bus->read_registers(chip_select_pin, accel_xout_h_reg, buffer, 14, spi_settings) == false)
+    const bool read_ok = p_spi_bus->read_registers(chip_select_pin, accel_xout_h_reg, buffer, 14, spi_settings);
+    if (read_ok == false)
     {
         return false;
     }
