@@ -1,12 +1,11 @@
 #include <Arduino.h>
 #include <esp_now.h>
 #include <WiFi.h>
-#include <esp_wifi.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-
-// #define ARM_BUTTON_PIN 6
-// #define RESET_BUTTON_PIN 7
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
+#include <freertos/task.h>
 
 #define OLED_SDA_PIN 8
 #define OLED_SCL_PIN 9
@@ -86,22 +85,16 @@ enum class DirectionState
     RIGHT
 };
 
-static attitude_data_packet_t attitude_data;
 static command_data_packet_t command_data;
 static heartbeat_data_packet_t heartbeat_data;
 
-static uint32_t last_arm_button_press_time = 0u;
-static uint32_t last_reset_button_press_time = 0u;
 static uint32_t last_joystick1_sw_press_time = 0u;
 static uint32_t last_joystick2_sw_press_time = 0u;
 
-static bool last_arm_button_state = HIGH;
-static bool last_reset_button_state = HIGH;
 static bool last_joystick1_sw_state = HIGH;
 static bool last_joystick2_sw_state = HIGH;
 
 static bool is_armed = false;
-static bool is_reset = false;
 
 static ThrottleState last_throttle_state = ThrottleState::UNKNOWN;
 static DirectionState last_direction_state = DirectionState::UNKNOWN;
@@ -110,20 +103,30 @@ static DirectionState last_direction_state = DirectionState::UNKNOWN;
 static constexpr uint8_t drone_address[] = {0x14, 0x63, 0x93, 0x6E, 0x72, 0xE0};
 
 Adafruit_SSD1306 display(OLED_SCREEN_WIDTH, OLED_SCREEN_HEIGHT, &Wire, OLED_RESET_PIN);
-static bool dbg_oled_ok = false;
+static bool oled_ok = false;
 
 static constexpr uint32_t display_update_interval = 100u;
 static uint32_t last_display_update_time = 0u;
+// Latest-frame-wins mailbox: no queue buildup when an I2C update runs late.
+// The producer is loop() only; the consumer exclusively owns SSD1306 calls.
+struct OledSnapshot
+{
+    flight_status_packet_t fc;
+    ThrottleState throttle;
+    DirectionState direction;
+    bool fc_recent;
+    bool is_armed;
+    bool arm_ack_seen;
+    bool rearm_required;
+};
+static QueueHandle_t s_oled_queue = nullptr;
+static bool s_oled_task_active = false;
+static constexpr uint32_t k_control_idle_delay_ms = 2u;
 
-// Diagnostics are printed only from loop(), never Wi-Fi callbacks.
-static volatile uint32_t dbg_tx_ok = 0;
-static volatile uint32_t dbg_tx_fail = 0;
-static volatile uint32_t dbg_rx_att = 0;
 static portMUX_TYPE s_status_mux = portMUX_INITIALIZER_UNLOCKED;
 static flight_status_packet_t s_flight_status{};
 static uint32_t s_flight_status_last_ms = 0;
 static bool s_flight_status_seen = false;
-static uint32_t s_flight_status_count = 0;
 static constexpr uint32_t g_status_timeout_ms = 750u;
 static constexpr uint32_t g_arm_ack_timeout_ms = 1500u;
 static bool g_arm_ack_seen = false;
@@ -144,47 +147,6 @@ static bool flight_status_fresh(flight_status_packet_t &out, uint32_t &age_ms)
     age_ms = millis() - last_ms;
 
     return ((seen == true) && (age_ms <= g_status_timeout_ms) && (out.magic == FLIGHT_STATUS_MAGIC));
-}
-
-static const char *status_reason_name(uint8_t reason)
-{
-    switch (reason)
-    {
-        case 0:
-        {
-            return "OK";
-        }
-
-        case 1:
-        {
-            return "WAIT_DISARM";
-        }
-
-        case 2:
-        {
-            return "STICK_NOT_NEUTRAL";
-        }
-
-        case 3:
-        {
-            return "CMD_TIMEOUT";
-        }
-
-        case 4:
-        {
-            return "HB_TIMEOUT";
-        }
-
-        case 5:
-        {
-            return "IMU_TIMEOUT";
-        }
-
-        default:
-        {
-            return "UNKNOWN";
-        }
-    }
 }
 
 // Flight owns the actual ARM state. Never continue sending an ARM request
@@ -227,28 +189,12 @@ static void update_flight_arm_sync(uint32_t now)
         g_arm_ack_seen = false;
         g_rearm_required = true;
         command_data = {};
-        Serial.printf("[CTRL FAULT] Flight state lost/unsafe; DISARM sent, REARM_REQUIRED. "
-                      "status=%u fc_arm=%u fs=%u imu=%u cmd_hb=%u ack_timeout=%u\n",
-                      unsigned(status_ok),
-                      unsigned(fc_armed),
-                      unsigned(fc_failsafe),
-                      unsigned(imu_ready),
-                      unsigned(uplink_fresh),
-                      unsigned(ack_timed_out));
         send_command();
     }
 }
 
-static volatile uint32_t dbg_rx_bad = 0;
-static volatile uint32_t dbg_rx_last_ms = 0;
-static volatile int dbg_rx_bad_len = 0;
-static uint32_t dbg_command_queued = 0;
-static uint32_t dbg_heartbeat_queued = 0;
-static uint32_t dbg_send_api_failed = 0;
-static uint32_t dbg_last_print_ms = 0;
-static uint32_t dbg_last_command_retx_ms = 0;
-static constexpr uint32_t dbg_print_period_ms = 500u;
-static constexpr uint32_t dbg_command_retx_period_ms = 50u;
+static uint32_t last_command_retx_ms = 0;
+static constexpr uint32_t command_retx_period_ms = 50u;
 
 void send_heartbeat();
 
@@ -262,7 +208,6 @@ struct JoyCenter
 static JoyCenter center;
 static bool arm_neutral_ready = false;
 static uint32_t arm_neutral_since = 0;
-static uint32_t last_calib_warning = 0;
 
 static bool near_value(int value, int target, int delta)
 {
@@ -322,7 +267,6 @@ static constexpr int k_cal_p10_p90_limit = 140;
 static uint16_t s_cal_adc[4][k_cal_samples] = {};
 static uint8_t s_cal_count = 0;
 static uint32_t s_cal_last_sample_ms = 0;
-static uint32_t s_cal_attempt = 0;
 
 static void update_joystick_calibration(uint32_t now, int x1, int y1, int x2, int y2)
 {
@@ -337,12 +281,6 @@ static void update_joystick_calibration(uint32_t now, int x1, int y1, int x2, in
     }
 
     s_cal_last_sample_ms = now;
-    if (s_cal_count == 0)
-    {
-        ++s_cal_attempt;
-        Serial.printf("[CAL START] attempt=%lu; leave BOTH joysticks at rest...\n", (unsigned long)s_cal_attempt);
-    }
-
     const int raw[4] = {x1, y1, x2, y2};
     for (int j = 0; j < 4; ++j)
     {
@@ -393,33 +331,13 @@ static void update_joystick_calibration(uint32_t now, int x1, int y1, int x2, in
     center.j1y = med[1];
     center.j2x = med[2];
     center.j2y = med[3];
-    Serial.printf("[CAL CENTER] J1 x=%d y=%d | J2 x=%d y=%d\n", center.j1x, center.j1y, center.j2x, center.j2y);
-    Serial.printf("[CAL SPREAD P10-P90] J1 x=%d y=%d | J2 x=%d y=%d (limit=%d)\n",
-                  spread[0],
-                  spread[1],
-                  spread[2],
-                  spread[3],
-                  k_cal_p10_p90_limit);
-
     center.valid = (stable == true);
-    if (center.valid == false)
-    {
-        Serial.println(
-            "[CAL RETRY] ADC center/noise not safe; ARM BLOCKED, automatically retrying. Release both sticks.");
-    }
-    else
+    if (center.valid == true)
     {
         // A newly valid center does not ARM the drone. The user must still
         // return to neutral and make a NEW ARM button press.
         arm_neutral_since = 0;
         arm_neutral_ready = false;
-        Serial.printf("[CAL OK] J1 UP>=%d DOWN<=%d | J2 F>=%d B<=%d R>=%d L<=%d\n",
-                      high_threshold(center.j1x),
-                      low_threshold(center.j1x),
-                      high_threshold(center.j2x),
-                      low_threshold(center.j2x),
-                      high_threshold(center.j2y),
-                      low_threshold(center.j2y));
     }
 }
 
@@ -488,73 +406,110 @@ static const char *direction_state_name(DirectionState s)
     }
 }
 
-static void debug_print_state(int x1, int y1, int x2, int y2)
+// Phase 2: phase-locked cadence. Skips missed slots rather than bursting
+// queued packets; the packet contents and configured intervals are unchanged.
+static bool periodic_due(uint32_t now_ms, uint32_t &last_deadline_ms, uint32_t interval_ms)
 {
-    const uint32_t now = millis();
-    const uint32_t age = (dbg_rx_att != 0u) ? now - dbg_rx_last_ms : 0u;
-    uint8_t ch = 0;
-    wifi_second_chan_t second = WIFI_SECOND_CHAN_NONE;
-    esp_wifi_get_channel(&ch, &second);
-
-    Serial.printf("[CTRL ADC] J1 x=%d y=%d =>%s | J2 x=%d y=%d =>%s\n",
-                  x1,
-                  y1,
-                  throttle_state_name(read_throttle_state(x1, y1)),
-                  x2,
-                  y2,
-                  direction_state_name(read_direction_state(x2, y2)));
-    Serial.printf("[CTRL STATE] local_arm=%u cmd: reset=%u UP=%u DOWN=%u F=%u B=%u L=%u R=%u wifi_ch=%u\n",
-                  unsigned(is_armed),
-                  unsigned(command_data.reset),
-                  unsigned(command_data.throttle_up),
-                  unsigned(command_data.throttle_down),
-                  unsigned(command_data.direction_forward),
-                  unsigned(command_data.direction_backward),
-                  unsigned(command_data.direction_left),
-                  unsigned(command_data.direction_right),
-                  unsigned(ch));
-
-    Serial.printf(
-        "[CTRL SYNC] fc_ack_seen=%u rearm_required=%u\n", unsigned(g_arm_ack_seen), unsigned(g_rearm_required));
-    Serial.printf("[CTRL LINK] cmd_queue=%lu hb_queue=%lu send_api_err=%lu mac_delivery_ok=%lu mac_delivery_fail=%lu ",
-                  (unsigned long)dbg_command_queued,
-                  (unsigned long)dbg_heartbeat_queued,
-                  (unsigned long)dbg_send_api_failed,
-                  (unsigned long)dbg_tx_ok,
-                  (unsigned long)dbg_tx_fail);
-
-    Serial.printf("rx_telemetry=%lu age_ms=", (unsigned long)dbg_rx_att);
-    if (dbg_rx_att != 0u)
+    const uint32_t elapsed = uint32_t(now_ms - last_deadline_ms);
+    if (elapsed < interval_ms)
     {
-        Serial.print((unsigned long)age);
+        return false;
+    }
+    last_deadline_ms += (elapsed / interval_ms) * interval_ms;
+    return true;
+}
+
+static OledSnapshot capture_oled_snapshot(ThrottleState throttle, DirectionState direction)
+{
+    OledSnapshot snapshot{};
+    snapshot.throttle = throttle;
+    snapshot.direction = direction;
+    snapshot.is_armed = is_armed;
+    snapshot.arm_ack_seen = g_arm_ack_seen;
+    snapshot.rearm_required = g_rearm_required;
+    uint32_t status_age_ms = 0u;
+    snapshot.fc_recent = (flight_status_fresh(snapshot.fc, status_age_ms) == true);
+    return snapshot;
+}
+
+// Exactly the same display content and layout as Phase 1. The snapshot avoids
+// reading mutable controller state from the OLED worker task.
+static void draw_oled_frame(const OledSnapshot &snapshot)
+{
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.print("ARM TX: ");
+    display.println((snapshot.is_armed == true) ? "ON" : "OFF");
+    display.setCursor(0, 10);
+    display.print("ARM FC: ");
+    if (snapshot.fc_recent == false)
+    {
+        display.println("NO STATUS");
     }
     else
     {
-        Serial.print("NEVER");
+        display.println(((snapshot.fc.flags & FLIGHT_STATUS_ARMED) != 0u) ? "ON" : "OFF");
     }
 
-    Serial.printf(" rx_invalid=%lu last_invalid_len=%d\n", (unsigned long)dbg_rx_bad, (int)dbg_rx_bad_len);
-    if (dbg_rx_att != 0u)
+    display.setCursor(0, 20);
+    const bool uplink_ok =
+        ((snapshot.fc_recent == true) && ((snapshot.fc.flags & (FLIGHT_STATUS_HB_RECENT | FLIGHT_STATUS_CMD_RECENT)) ==
+                                          (FLIGHT_STATUS_HB_RECENT | FLIGHT_STATUS_CMD_RECENT)));
+    display.print("LINK: ");
+    display.print((uplink_ok == true) ? "OK" : "LOST");
+    display.print(" FS:");
+    if (snapshot.fc_recent == false)
     {
-        Serial.printf("[CTRL TELEMETRY] roll=%.1f pitch=%.1f yaw=%.1f\n",
-                      attitude_data.roll,
-                      attitude_data.pitch,
-                      attitude_data.yaw);
+        display.println("--");
+    }
+    else
+    {
+        display.println(((snapshot.fc.flags & FLIGHT_STATUS_FAILSAFE) != 0u) ? "YES" : "NO");
     }
 
-    flight_status_packet_t st{};
-    uint32_t age_ms = 0;
-    const bool recent = (flight_status_fresh(st, age_ms) == true);
-    Serial.printf("[CTRL FC] status_recent=%u age_ms=%lu fc_arm=%u failsafe=%u cmd_recent=%u hb_recent=%u motor_us=%u "
-                  "reason=%s\n",
-                  unsigned(recent),
-                  (unsigned long)age_ms,
-                  unsigned(((recent == true) && ((st.flags & FLIGHT_STATUS_ARMED) != 0u))),
-                  unsigned(((recent == true) && ((st.flags & FLIGHT_STATUS_FAILSAFE) != 0u))),
-                  unsigned(((recent == true) && ((st.flags & FLIGHT_STATUS_CMD_RECENT) != 0u))),
-                  unsigned(((recent == true) && ((st.flags & FLIGHT_STATUS_HB_RECENT) != 0u))),
-                  unsigned((recent == true) ? st.motor_output_us : 0u),
-                  (recent == true) ? status_reason_name(st.reason) : "NO_STATUS");
+    display.setCursor(0, 30);
+    display.print("MOTOR: ");
+    if (snapshot.fc_recent == true)
+    {
+        display.println(snapshot.fc.motor_output_us);
+    }
+    else
+    {
+        display.println("--");
+    }
+
+    display.setCursor(0, 40);
+    display.print("THR: ");
+    display.println(throttle_state_name(snapshot.throttle));
+    display.setCursor(0, 50);
+    if (snapshot.rearm_required == true)
+    {
+        display.println("REARM: PRESS ARM");
+    }
+    else if ((snapshot.is_armed == true) && (snapshot.arm_ack_seen == false))
+    {
+        display.println("ARM: WAIT FC ACK");
+    }
+    else
+    {
+        display.print("DIR: ");
+        display.println(direction_state_name(snapshot.direction));
+    }
+
+    display.display();
+}
+
+static void oled_worker_task(void *context)
+{
+    (void)context;
+    OledSnapshot snapshot{};
+    for (;;)
+    {
+        if (xQueueReceive(s_oled_queue, &snapshot, portMAX_DELAY) == pdTRUE)
+        {
+            draw_oled_frame(snapshot);
+        }
+    }
 }
 
 static constexpr uint32_t heartbeat_update_interval = 100u;
@@ -562,35 +517,13 @@ static uint32_t last_heartbeat_data_send_time = 0u;
 
 void send_command()
 {
-    esp_err_t result = esp_now_send(drone_address, reinterpret_cast<uint8_t *>(&command_data), sizeof(command_data));
-
-    if (result == ESP_OK)
-    {
-        dbg_command_queued++;
-    }
-    else
-    {
-        dbg_send_api_failed++;
-        Serial.printf("[CTRL TX CMD API ERROR] esp_err_t=%d\n", int(result));
-    }
+    (void)esp_now_send(drone_address, reinterpret_cast<uint8_t *>(&command_data), sizeof(command_data));
 }
 
 void send_heartbeat()
 {
     heartbeat_data.counter++;
-
-    esp_err_t result =
-        esp_now_send(drone_address, reinterpret_cast<uint8_t *>(&heartbeat_data), sizeof(heartbeat_data));
-
-    if (result == ESP_OK)
-    {
-        dbg_heartbeat_queued++;
-    }
-    else
-    {
-        dbg_send_api_failed++;
-        Serial.printf("[CTRL TX HB API ERROR] esp_err_t=%d\n", int(result));
-    }
+    (void)esp_now_send(drone_address, reinterpret_cast<uint8_t *>(&heartbeat_data), sizeof(heartbeat_data));
 }
 
 ThrottleState read_throttle_state(int xValue, int yValue)
@@ -768,8 +701,6 @@ void on_data_recv(const esp_now_recv_info_t *info, const uint8_t *data, int len)
         memcpy(&st, data, sizeof(st));
         if (st.magic != FLIGHT_STATUS_MAGIC)
         {
-            dbg_rx_bad++;
-            dbg_rx_bad_len = len;
             return;
         }
 
@@ -777,82 +708,25 @@ void on_data_recv(const esp_now_recv_info_t *info, const uint8_t *data, int len)
         s_flight_status = st;
         s_flight_status_last_ms = millis();
         s_flight_status_seen = true;
-        s_flight_status_count++;
         portEXIT_CRITICAL(&s_status_mux);
         return;
     }
-
-    if (len == int(sizeof(attitude_data_packet_t)))
-    {
-        memcpy(&attitude_data, data, sizeof(attitude_data));
-        dbg_rx_att++;
-        dbg_rx_last_ms = millis();
-        return;
-    }
-
-    dbg_rx_bad++;
-    dbg_rx_bad_len = len;
-}
-
-void on_data_sent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status)
-{
-    (void)tx_info;
-    if (status == ESP_NOW_SEND_SUCCESS)
-    {
-        dbg_tx_ok++;
-    }
-    else
-    {
-        dbg_tx_fail++;
-    }
-
-    // Serial.print("\nLast Packet Send Status: ");
-
-    // if (status == ESP_NOW_SEND_SUCCESS)
-    // {
-    //     Serial.println("Delivery Success");
-    // }
-    // else
-    // {
-    //     Serial.println("Delivery Fail");
-    // }
 }
 
 void setup()
 {
-    Serial.begin(115200);
-    const uint32_t serial_start_ms = millis();
-    while ((static_cast<bool>(Serial) == false) && (millis() - serial_start_ms < 1500u))
-    {
-        delay(10);
-    }
-
     delay(250);
-    Serial.println("[CTRL] ESP-NOW controller started");
 
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
-    Serial.printf("[CTRL WIFI] local_sta_mac=%s expected_flight_mac=%02X:%02X:%02X:%02X:%02X:%02X channel=%d\n",
-                  WiFi.macAddress().c_str(),
-                  drone_address[0],
-                  drone_address[1],
-                  drone_address[2],
-                  drone_address[3],
-                  drone_address[4],
-                  drone_address[5],
-                  WiFi.channel());
-
     if (esp_now_init() != ESP_OK)
     {
-        Serial.println("Error initializing ESP-NOW");
         for (;;)
         {
         }
     }
 
-    Serial.println("[CTRL ESPNOW] init OK");
     esp_now_register_recv_cb(on_data_recv);
-    esp_now_register_send_cb(on_data_sent);
 
     // Register peer
     esp_now_peer_info_t peerInfo = {};
@@ -863,16 +737,10 @@ void setup()
     // Add peer
     if (esp_now_add_peer(&peerInfo) != ESP_OK)
     {
-        Serial.println("Failed to add peer");
         for (;;)
         {
         }
     }
-
-    Serial.println("[CTRL ESPNOW] peer registered OK");
-
-    // pinMode(ARM_BUTTON_PIN, INPUT_PULLUP);
-    // pinMode(RESET_BUTTON_PIN, INPUT_PULLUP);
 
     pinMode(JOYSTICK1_SW_PIN, INPUT_PULLUP);
     pinMode(JOYSTICK2_SW_PIN, INPUT_PULLUP);
@@ -881,21 +749,34 @@ void setup()
 
     Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
 
-    dbg_oled_ok = display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-    if (dbg_oled_ok == false)
-    {
-        Serial.println(F("[CTRL OLED] SSD1306 failed: continue with Serial only"));
-    }
-    else
+    oled_ok = display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+    if (oled_ok == true)
     {
         display.clearDisplay();
         display.setTextSize(1);
         display.setTextColor(SSD1306_WHITE);
     }
 
+    // Create the OLED mailbox once, after Wire/display initialization.
+    // The control loop keeps default priority; background display is idle
+    // priority and runs while the control loop yields in delay(2).
+    if (oled_ok == true)
+    {
+        s_oled_queue = xQueueCreate(1u, sizeof(OledSnapshot));
+        if (s_oled_queue != nullptr)
+        {
+            const BaseType_t started =
+                xTaskCreate(oled_worker_task, "oled_worker", 4096u, nullptr, tskIDLE_PRIORITY, nullptr);
+            s_oled_task_active = (started == pdPASS);
+            if (s_oled_task_active == false)
+            {
+                vQueueDelete(s_oled_queue);
+                s_oled_queue = nullptr;
+            }
+        }
+    }
+
     delay(600);
-    Serial.println("[CAL] Auto-calibration runs in loop, without blocking ESPNOW commands.");
-    Serial.println("[CAL] Keep BOTH joysticks centered; ARM stays blocked until [CAL OK].");
 }
 
 void loop()
@@ -942,7 +823,6 @@ void loop()
             is_armed = false;
             g_arm_ack_seen = false;
             g_rearm_required = false;
-            Serial.println("[CTRL ARM] DISARM (local command)");
         }
         else
         {
@@ -959,16 +839,10 @@ void loop()
                 g_arm_ack_seen = false;
                 g_rearm_required = false;
                 g_arm_request_time_ms = now;
-                Serial.println("[CTRL ARM REQUEST] ARM=1 sent; wait for [CTRL FC] fc_arm=1 ACK");
             }
             else
             {
                 is_armed = false;
-                Serial.printf("[CTRL ARM BLOCKED] stick_ready=%u fc_ready=%u status_recent=%u fc_reason=%s\n",
-                              unsigned(arm_neutral_ready),
-                              unsigned(remote_ready),
-                              unsigned(status_ok),
-                              (status_ok == true) ? status_reason_name(fc.reason) : "NO_STATUS");
             }
         }
 
@@ -997,7 +871,6 @@ void loop()
         command_data.reset = true;
         send_command();
         command_data.reset = false;
-        Serial.println("[CTRL RESET] Reset command sent; local DISARM");
     }
 
     last_joystick2_sw_state = (reset_button == true);
@@ -1020,86 +893,34 @@ void loop()
         command_data.direction_right = false;
     }
 
-    if (now - last_heartbeat_data_send_time >= heartbeat_update_interval)
+    if (periodic_due(now, last_heartbeat_data_send_time, heartbeat_update_interval) == true)
     {
-        last_heartbeat_data_send_time = now;
         send_heartbeat();
     }
 
-    if (now - dbg_last_command_retx_ms >= dbg_command_retx_period_ms)
+    if (periodic_due(now, last_command_retx_ms, command_retx_period_ms) == true)
     {
-        dbg_last_command_retx_ms = now;
         send_command();
     }
 
-    if ((dbg_oled_ok == true) && (now - last_display_update_time >= display_update_interval))
+    if ((oled_ok == true) && (now - last_display_update_time >= display_update_interval))
     {
+        // Preserve Phase 1's display cadence and screen content. No I2C in
+        // the control loop on the normal (worker available) path.
         last_display_update_time = now;
-        display.clearDisplay();
-        display.setCursor(0, 0);
-        flight_status_packet_t fc{};
-        uint32_t age_ms = 0;
-        const bool fc_recent = (flight_status_fresh(fc, age_ms) == true);
-        display.print("ARM TX: ");
-        display.println((is_armed == true) ? "ON" : "OFF");
-        display.setCursor(0, 10);
-        display.print("ARM FC: ");
-        if (fc_recent == false)
+        const OledSnapshot snapshot = capture_oled_snapshot(throttle_state, direction_state);
+        if (s_oled_task_active == true)
         {
-            display.println("NO STATUS");
+            (void)xQueueOverwrite(s_oled_queue, &snapshot);
         }
         else
         {
-            display.println(((fc.flags & FLIGHT_STATUS_ARMED) != 0u) ? "ON" : "OFF");
+            // Memory-constrained startup: OLED still functions as before.
+            draw_oled_frame(snapshot);
         }
-
-        display.setCursor(0, 20);
-        const bool uplink_ok =
-            ((fc_recent == true) && ((fc.flags & (FLIGHT_STATUS_HB_RECENT | FLIGHT_STATUS_CMD_RECENT)) ==
-                                     (FLIGHT_STATUS_HB_RECENT | FLIGHT_STATUS_CMD_RECENT)));
-        display.print("LINK: ");
-        display.print((uplink_ok == true) ? "OK" : "LOST");
-        display.print(" FS:");
-        if (fc_recent == false)
-        {
-            display.println("--");
-        }
-        else
-        {
-            display.println(((fc.flags & FLIGHT_STATUS_FAILSAFE) != 0u) ? "YES" : "NO");
-        }
-
-        display.setCursor(0, 30);
-        display.print("MOTOR: ");
-        if (fc_recent == true)
-        {
-            display.println(fc.motor_output_us);
-        }
-        else
-        {
-            display.println("--");
-        }
-
-        display.setCursor(0, 40);
-        display.print("THR: ");
-        display.println(throttle_state_name(throttle_state));
-        display.setCursor(0, 50);
-        if (g_rearm_required == true)
-        {
-            display.println("REARM: PRESS ARM");
-        }
-        else if ((is_armed == true) && (g_arm_ack_seen == false))
-        {
-            display.println("ARM: WAIT FC ACK");
-        }
-        else
-        {
-            display.print("DIR: ");
-            display.println(direction_state_name(direction_state));
-        }
-
-        display.display();
     }
 
-    delay(10);
+    // Short cooperative sleep bounds dispatch jitter and leaves time for
+    // Wi-Fi, Idle and the low-priority OLED worker on the single-core C3.
+    delay(k_control_idle_delay_ms);
 }
